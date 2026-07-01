@@ -14,6 +14,7 @@ import { SpaceBackground } from './components/SpaceBackground';
 import { TrainingPanelLab } from './components/TrainingPanelLab';
 import { RippleLayer } from './components/RippleLayer';
 import { PianoKeyboard } from './components/PianoKeyboard';
+import SoundManager from './components/SoundManager';
 
 const AppContent = () => {
   const { tiltX, tiltY } = useParallax();
@@ -84,6 +85,13 @@ export default function App() {
   React.useEffect(() => {
     // 앱이 켜질 때 가로 모드로 강제 고정
     ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+    
+    // 사운드 매니저 초기화 (피아노 소리 24개 프리로드)
+    SoundManager.init();
+    
+    return () => {
+      SoundManager.unloadAll();
+    };
   }, []);
 
   return (
