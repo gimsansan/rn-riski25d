@@ -5,7 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing, withSequence } from 'react-native-reanimated';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-
+import MugicPage from './existing_file/index'
 // Hooks
 import { useParallax } from './hooks/useParallax';
 
@@ -28,7 +28,7 @@ const AppContent = () => {
   // 화면을 터치했을 때 실행되는 함수
   const handlePress = (event: any) => {
     const { locationX, locationY } = event.nativeEvent;
-    
+
     // 터치 위치 업데이트
     touchX.value = locationX;
     touchY.value = locationY;
@@ -55,7 +55,7 @@ const AppContent = () => {
     <SafeAreaView style={styles.container}>
       {/* 화면 전체 터치 감지 영역 */}
       <Pressable style={StyleSheet.absoluteFill} onPress={handlePress}>
-        
+
         {/* 1. Background Layer (우주 배경) */}
         <View style={styles.backgroundLayer} pointerEvents="none">
           <SpaceBackground />
@@ -84,13 +84,22 @@ const AppContent = () => {
 export default function App() {
   React.useEffect(() => {
     // 앱이 켜질 때 가로 모드로 강제 고정
-    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
-    
+    //  ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+
     // 사운드 매니저 초기화 (피아노 소리 24개 프리로드)
-    SoundManager.init();
-    
+    //    SoundManager.init();
+
+    /*     return () => {
+          SoundManager.unloadAll();
+        }; */
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+
+    // (선택) 기존 AppContent에서 쓰던 SoundManager 초기화는 
+    // 새 index.tsx 내부에서 직접 처리하므로 여기서는 지우거나 주석 처리해도 무방합니다.
+    // SoundManager.init(); 
+
     return () => {
-      SoundManager.unloadAll();
+      // SoundManager.unloadAll();
     };
   }, []);
 
@@ -98,7 +107,7 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <NavigationContainer>
-          <AppContent />
+          <MugicPage />
         </NavigationContainer>
       </SafeAreaProvider>
     </GestureHandlerRootView>
