@@ -106,9 +106,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <NavigationContainer>
-          <MugicPage />
-        </NavigationContainer>
+        <AppContent />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
