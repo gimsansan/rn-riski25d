@@ -41,3 +41,5 @@ Always separate "what is ideal in principle" from "what I actually recommend giv
 8) walkthrough.md 를 너가 생성하면 나에게 묻지 말고 항상 저장을 해
 9) android 모바일 앱이므로, ios 관련 코드는 불필요함.
 10) 문서 갱신 시는  walkthrough.md, implementation_plan.md 둘 다 해줘.
+11)- **명시적 승인 전 코드 수정 및 도구 실행 절대 금지**: 
+  어떤 가벼운 수정이나 한 줄의 코드 변경이라도 사용자가 먼저 "수정해 줘", "진행해" 등 명시적으로 동의하거나 지시하기 전에는 절대로 코드 수정 도구(예: replace_file_content, write_to_file 등)를 호출하여 실행하지 마라. 항상 해결 방안이나 변경 계획을 텍스트로 제안하여 먼저 묻고, 사용자의 확답을 얻은 뒤에만 실제 작업을 수행하라.

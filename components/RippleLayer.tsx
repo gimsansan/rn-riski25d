@@ -12,7 +12,7 @@ interface RippleLayerProps {
 export const RippleLayer: React.FC<RippleLayerProps> = ({ touchX, touchY, rippleProgress }) => {
   // 단순한 믹스(보간) 함수 (UI 스레드에서 안전하게 실행되도록 작성)
   const r = useDerivedValue(() => {
-    return rippleProgress.value * 300; // 0 -> 300
+    return rippleProgress.value * 100;
   });
 
   const opacity = useDerivedValue(() => {
