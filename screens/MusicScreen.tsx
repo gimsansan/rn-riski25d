@@ -1,18 +1,124 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAudioPlayer } from 'expo-audio';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as Haptics from 'expo-haptics';
 import React, { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  Pressable,
   View,
   useWindowDimensions,
 } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withTiming } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused } from '@react-navigation/native';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// 2.5D 타격감을 제공하는 개별 피아노 건반 컴포넌트 (UI 스레드 구동)
+const PianoKey = React.memo(({
+  note,
+  isBlack,
+  isVisible,
+  width,
+  height,
+  leftPosition,
+  onPressIn,
+  onPressOut,
+  showKeyLabels,
+  keyboardLabel,
+}: {
+  note: Note;
+  isBlack: boolean;
+  isVisible: boolean;
+  width: number;
+  height: number;
+  leftPosition?: number;
+  onPressIn: (note: Note) => void;
+  onPressOut: (note: Note) => void;
+  showKeyLabels: boolean;
+  keyboardLabel?: string;
+}) => {
+  const translateY = useSharedValue(0);
+  const shadowOpacity = useSharedValue(isBlack ? 0.35 : 0.15);
+
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateY: translateY.value }],
+      shadowOpacity: shadowOpacity.value,
+      backgroundColor: isBlack
+        ? (translateY.value > 0 ? '#2a2a2a' : '#111111')
+        : (translateY.value > 0 ? '#ececec' : '#ffffff'),
+    };
+  });
+
+  const handlePressIn = () => {
+    if (!isVisible) return;
+
+    // Y축으로 즉시 눌림 작동 (백건 10px, 흑건 8px)
+    translateY.value = isBlack ? 14 : 18;
+    shadowOpacity.value = 0.06; // 눌리면 입체 그림자가 사라지듯 옅어짐
+
+    // 햅틱 진동 유발 (가벼운 타격감)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { });
+
+    onPressIn(note);
+  };
+
+  const handlePressOut = () => {
+    if (!isVisible) return;
+
+    // 부드럽게 원위치로 복구
+    translateY.value = withTiming(0, { duration: 120 });
+    shadowOpacity.value = withTiming(isBlack ? 0.35 : 0.15, { duration: 120 });
+
+    onPressOut(note);
+  };
+
+  if (isBlack) {
+    return (
+      <AnimatedPressable
+        disabled={!isVisible}
+        style={[
+          styles.blackKey,
+          { width, height, left: leftPosition },
+          animatedStyle,
+          !isVisible && styles.keyDisabled
+        ]}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <Text style={[styles.blackKeyTextLabel, !isVisible && styles.keyLabelDisabled]}>{note}</Text>
+        {showKeyLabels && keyboardLabel && (
+          <Text style={[styles.blackKeyLabel, !isVisible && styles.keyLabelDisabled]}>{keyboardLabel}</Text>
+        )}
+      </AnimatedPressable>
+    );
+  }
+
+  return (
+    <AnimatedPressable
+      disabled={!isVisible}
+      style={[
+        styles.whiteKey,
+        { width, height },
+        animatedStyle,
+        !isVisible && styles.whiteKeyDisabled
+      ]}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+    >
+      <Text style={[styles.keyTextLabel, !isVisible && styles.keyLabelDisabled]}>{note}</Text>
+      {showKeyLabels && keyboardLabel && (
+        <Text style={[styles.whiteKeyLabel, !isVisible && styles.keyLabelDisabled]}>{keyboardLabel}</Text>
+      )}
+    </AnimatedPressable>
+  );
+});
+
 import { MissionProgressIcon } from '../components/MissionProgressIcon';
 import { ClearContext } from '../context/ClearContext';
 import { StarContext } from '../context/StarContext';
@@ -127,16 +233,16 @@ const useAutoFocusViewport = ({
 
 // 키보드-음계 매핑 (물리 건반 단축키용)
 const keyToNoteMap: { [key: string]: Note } = {
-  'q': 'C3',  'w': 'D3',  'e': 'E3',  'r': 'F3',  't': 'G3',  'y': 'A3',  'u': 'B3',
-  'i': 'C4',  'o': 'D4',  'p': 'E4',  '[': 'F4',  ']': 'G4',  '\\': 'A4', 'a': 'B4',
-  's': 'C5',  'd': 'D5',
-  'Q': 'C#3', 'W': 'D#3',             'R': 'F#3', 'T': 'G#3', 'Y': 'A#3',
-  'I': 'C#4', 'O': 'D#4',             '{': 'F#4', '}': 'G#4', '|': 'A#4',
+  'q': 'C3', 'w': 'D3', 'e': 'E3', 'r': 'F3', 't': 'G3', 'y': 'A3', 'u': 'B3',
+  'i': 'C4', 'o': 'D4', 'p': 'E4', '[': 'F4', ']': 'G4', '\\': 'A4', 'a': 'B4',
+  's': 'C5', 'd': 'D5',
+  'Q': 'C#3', 'W': 'D#3', 'R': 'F#3', 'T': 'G#3', 'Y': 'A#3',
+  'I': 'C#4', 'O': 'D#4', '{': 'F#4', '}': 'G#4', '|': 'A#4',
   'S': 'C#5', 'D': 'D#5',
-  'f': 'C1',  'g': 'D1',  'h': 'E1',  'j': 'F1',  'k': 'G1',  'l': 'A1',  ';': 'B1',
-  "'": 'C2',  'z': 'D2',  'x': 'E2',  'c': 'F2',  'v': 'G2',  'b': 'A2',  'n': 'B2',
-  'F': 'C#1', 'G': 'D#1',             'J': 'F#1', 'K': 'G#1', 'L': 'A#1',
-  '"': 'C#2', 'Z': 'D#2',             'C': 'F#2', 'V': 'G#2', 'B': 'A#2',
+  'f': 'C1', 'g': 'D1', 'h': 'E1', 'j': 'F1', 'k': 'G1', 'l': 'A1', ';': 'B1',
+  "'": 'C2', 'z': 'D2', 'x': 'E2', 'c': 'F2', 'v': 'G2', 'b': 'A2', 'n': 'B2',
+  'F': 'C#1', 'G': 'D#1', 'J': 'F#1', 'K': 'G#1', 'L': 'A#1',
+  '"': 'C#2', 'Z': 'D#2', 'C': 'F#2', 'V': 'G#2', 'B': 'A#2',
 };
 
 const noteToKeyMap = Object.entries(keyToNoteMap).reduce((acc, [key, note]) => {
@@ -154,11 +260,11 @@ const level5_specialTraining: Note[] = allNotes.filter(note => isBlackKeyMap[not
 
 type Difficulty = '1단계' | '2단계' | '3단계' | '4단계' | '5단계';
 const difficultyLevels: { name: Difficulty, label: string }[] = [
-    { name: '1단계', label: '입문' },
-    { name: '2단계', label: '초급' },
-    { name: '3단계', label: '중급' },
-    { name: '4단계', label: '상급' },
-    { name: '5단계', label: '전문' },
+  { name: '1단계', label: '입문' },
+  { name: '2단계', label: '초급' },
+  { name: '3단계', label: '중급' },
+  { name: '4단계', label: '상급' },
+  { name: '5단계', label: '전문' },
 ];
 
 const MUSIC_PROGRESS_KEY = '@MiniGameApp:musicProgress';
@@ -172,17 +278,17 @@ interface MusicProgress {
 
 // 옥타브 시프트 뷰포트 하의 건반 렌더링
 const renderPianoViewportRow = (
-  notes: Note[], 
-  visibleNotes: Set<Note>, 
-  activeNotes: any, 
-  handlers: any, 
-  dynamicStyles: any, 
+  notes: Note[],
+  visibleNotes: Set<Note>,
+  activeNotes: any,
+  handlers: any,
+  dynamicStyles: any,
   showKeyLabels: boolean,
   viewportStartIdx: number,
   viewportSize: number
 ) => {
   const whiteKeys = notes.filter(note => !isBlackKeyMap[note]);
-  
+
   // 전체 백건 중 현재 뷰포트에 포함될 14개의 백건 필터링
   const visibleWhiteKeys = whiteKeys.slice(viewportStartIdx, viewportStartIdx + viewportSize);
   const visibleWhiteKeySet = new Set(visibleWhiteKeys);
@@ -190,93 +296,80 @@ const renderPianoViewportRow = (
   // 뷰포트 내 백건들에 인접한 흑건들만 도출
   const visibleBlackKeys = notes.filter(note => {
     if (!isBlackKeyMap[note]) return false;
-    
+
     // 이 흑건에 바로 선행하는 백건 찾기
     const noteName = note.substring(0, note.length - 1);
     const octave = note.substring(note.length - 1);
     let precedingWhiteKeyNote: Note | undefined;
     switch (noteName) {
-        case 'C#': precedingWhiteKeyNote = `C${octave}` as Note; break;
-        case 'D#': precedingWhiteKeyNote = `D${octave}` as Note; break;
-        case 'F#': precedingWhiteKeyNote = `F${octave}` as Note; break;
-        case 'G#': precedingWhiteKeyNote = `G${octave}` as Note; break;
-        case 'A#': precedingWhiteKeyNote = `A${octave}` as Note; break;
+      case 'C#': precedingWhiteKeyNote = `C${octave}` as Note; break;
+      case 'D#': precedingWhiteKeyNote = `D${octave}` as Note; break;
+      case 'F#': precedingWhiteKeyNote = `F${octave}` as Note; break;
+      case 'G#': precedingWhiteKeyNote = `G${octave}` as Note; break;
+      case 'A#': precedingWhiteKeyNote = `A${octave}` as Note; break;
     }
     return precedingWhiteKeyNote ? visibleWhiteKeySet.has(precedingWhiteKeyNote) : false;
   });
 
   const getBlackKeyPosition = (note: Note): number | null => {
-      const { whiteKeyWidth, blackKeyWidth } = dynamicStyles;
-      const noteName = note.substring(0, note.length - 1);
-      const octave = note.substring(note.length - 1);
-      let precedingWhiteKeyNote: Note | undefined;
-      switch (noteName) {
-          case 'C#': precedingWhiteKeyNote = `C${octave}` as Note; break;
-          case 'D#': precedingWhiteKeyNote = `D${octave}` as Note; break;
-          case 'F#': precedingWhiteKeyNote = `F${octave}` as Note; break;
-          case 'G#': precedingWhiteKeyNote = `G${octave}` as Note; break;
-          case 'A#': precedingWhiteKeyNote = `A${octave}` as Note; break;
-      }
-      if (!precedingWhiteKeyNote) return null;
-      const index = visibleWhiteKeys.indexOf(precedingWhiteKeyNote);
-      if (index === -1) return null;
-      // 뷰포트 상대적 위치로 흑건 위치 계산
-      return (index + 1) * whiteKeyWidth - (blackKeyWidth / 2);
+    const { whiteKeyWidth, blackKeyWidth } = dynamicStyles;
+    const noteName = note.substring(0, note.length - 1);
+    const octave = note.substring(note.length - 1);
+    let precedingWhiteKeyNote: Note | undefined;
+    switch (noteName) {
+      case 'C#': precedingWhiteKeyNote = `C${octave}` as Note; break;
+      case 'D#': precedingWhiteKeyNote = `D${octave}` as Note; break;
+      case 'F#': precedingWhiteKeyNote = `F${octave}` as Note; break;
+      case 'G#': precedingWhiteKeyNote = `G${octave}` as Note; break;
+      case 'A#': precedingWhiteKeyNote = `A${octave}` as Note; break;
+    }
+    if (!precedingWhiteKeyNote) return null;
+    const index = visibleWhiteKeys.indexOf(precedingWhiteKeyNote);
+    if (index === -1) return null;
+    // 뷰포트 상대적 위치로 흑건 위치 계산
+    return (index + 1) * whiteKeyWidth - (blackKeyWidth / 2);
   };
-  
+
   return (
-      <View style={styles.rowContainer}>
-          {visibleWhiteKeys.map(note => {
-              const isVisible = visibleNotes.has(note);
-              return (
-                  <TouchableOpacity
-                      key={note}
-                      disabled={!isVisible}
-                      style={[ 
-                        styles.whiteKey, 
-                        { width: dynamicStyles.whiteKeyWidth, height: dynamicStyles.whiteKeyHeight }, 
-                        activeNotes[note] && styles.whiteKeyPressed, 
-                        !isVisible && styles.whiteKeyDisabled 
-                      ]}
-                      onPressIn={() => handlers.handleNotePressIn(note)}
-                      onPressOut={() => handlers.handleNotePressOut(note)}
-                      activeOpacity={1}
-                  >
-                      {/* 건반 하단에 음계 텍스트 표시 */}
-                      <Text style={[styles.keyTextLabel, !isVisible && styles.keyLabelDisabled]}>{note}</Text>
-                      {showKeyLabels && noteToKeyMap[note] && (
-                        <Text style={[styles.whiteKeyLabel, !isVisible && styles.keyLabelDisabled]}>{noteToKeyMap[note]}</Text>
-                      )}
-                  </TouchableOpacity>
-              );
-          })}
-          {visibleBlackKeys.map(note => {
-              const isVisible = visibleNotes.has(note);
-              const leftPosition = getBlackKeyPosition(note);
-              if (leftPosition === null) return null;
-              return (
-                  <TouchableOpacity
-                      key={note}
-                      disabled={!isVisible}
-                      style={[ 
-                        styles.blackKey, 
-                        { width: dynamicStyles.blackKeyWidth, height: dynamicStyles.blackKeyHeight, left: leftPosition }, 
-                        activeNotes[note] && styles.blackKeyPressed, 
-                        !isVisible && styles.keyDisabled 
-                      ]}
-                      onPressIn={() => handlers.handleNotePressIn(note)}
-                      onPressOut={() => handlers.handleNotePressOut(note)}
-                      activeOpacity={1}
-                  >
-                      {/* 흑건 하단에 음계 텍스트 표시 */}
-                      <Text style={[styles.blackKeyTextLabel, !isVisible && styles.keyLabelDisabled]}>{note}</Text>
-                      {showKeyLabels && noteToKeyMap[note] && (
-                        <Text style={[styles.blackKeyLabel, !isVisible && styles.keyLabelDisabled]}>{noteToKeyMap[note]}</Text>
-                      )}
-                  </TouchableOpacity>
-              );
-          })}
-      </View>
+    <View style={styles.rowContainer}>
+      {visibleWhiteKeys.map(note => {
+        const isVisible = visibleNotes.has(note);
+        return (
+          <PianoKey
+            key={note}
+            note={note}
+            isBlack={false}
+            isVisible={isVisible}
+            width={dynamicStyles.whiteKeyWidth}
+            height={dynamicStyles.whiteKeyHeight}
+            onPressIn={handlers.handleNotePressIn}
+            onPressOut={handlers.handleNotePressOut}
+            showKeyLabels={showKeyLabels}
+            keyboardLabel={noteToKeyMap[note]}
+          />
+        );
+      })}
+      {visibleBlackKeys.map(note => {
+        const isVisible = visibleNotes.has(note);
+        const leftPosition = getBlackKeyPosition(note);
+        if (leftPosition === null) return null;
+        return (
+          <PianoKey
+            key={note}
+            note={note}
+            isBlack={true}
+            isVisible={isVisible}
+            width={dynamicStyles.blackKeyWidth}
+            height={dynamicStyles.blackKeyHeight}
+            leftPosition={leftPosition}
+            onPressIn={handlers.handleNotePressIn}
+            onPressOut={handlers.handleNotePressOut}
+            showKeyLabels={showKeyLabels}
+            keyboardLabel={noteToKeyMap[note]}
+          />
+        );
+      })}
+    </View>
   );
 };
 
@@ -296,7 +389,7 @@ export default function Music() {
 
   // 옥타브 시프트 뷰포트 관련 상태 (기본 14번째 백건 = C3 시작)
   const VIEWPORT_SIZE = 14; // 화면에 한 번에 노출될 백건 개수 (2옥타브 분량)
-  const [viewportStartIdx, setViewportStartIdx] = useState(14); 
+  const [viewportStartIdx, setViewportStartIdx] = useState(14);
 
   // 새 문제 출제 시 화면 바깥에 있으면 자동으로 뷰포트 옥타브 시프트
   useAutoFocusViewport({
@@ -309,7 +402,7 @@ export default function Music() {
 
   const { height, width } = useWindowDimensions();  // 화면 크기
 
-  useEffect(() => { 
+  useEffect(() => {
     if (!overlayVisible) return;
     rotation.value = 0;
     rotation.value = withRepeat(
@@ -324,7 +417,7 @@ export default function Music() {
   }));
   const soundCache = useRef<{ [key in Note]?: any }>({});
   const recentlyUsedNotes = useRef<Note[]>([]);
-  
+
   const starContext = useContext(StarContext) as any;
   const clearContext = useContext(ClearContext) as any;
 
@@ -366,7 +459,7 @@ export default function Music() {
   useEffect(() => {
     if (!isFocused) {
       setOverlayVisible(true);
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => { });
       return;
     }
     const t = setTimeout(async () => {
@@ -400,14 +493,14 @@ export default function Music() {
       }
       recentlyUsedNotes.current = recentlyUsedNotes.current.filter(n => n !== note);
       recentlyUsedNotes.current.unshift(note);
-      
+
       await player.seekTo(0);
       player.play();
     } catch (error) {
       console.log(`'${note}' 음원 재생 실패:`, error);
     }
   };
-  
+
   const playNextQuestion = useCallback(() => {
     let notesToUse: Note[];
     switch (difficulty) {
@@ -422,7 +515,7 @@ export default function Music() {
     const randomNote = notesToUse[randomIndex];
     setCurrentNote(randomNote);
     playSound(randomNote);
-  }, [difficulty]); 
+  }, [difficulty]);
 
   const startTraining = () => {
     setIsTraining(true);
@@ -454,7 +547,7 @@ export default function Music() {
 
         const currentProgress = progress[difficulty] || { cumulativeSuccesses: 0, highestScore: 0 };
         const newCumulativeSuccesses = currentProgress.cumulativeSuccesses + 1;
-        
+
         const updatedProgress = {
           ...progress,
           [difficulty]: {
@@ -463,12 +556,12 @@ export default function Music() {
           }
         };
         setProgress(updatedProgress);
-        
+
         if (newCumulativeSuccesses >= 3) {
-            starContext?.addStar(`music_${difficulty}`);
+          starContext?.addStar(`music_${difficulty}`);
         }
         if (newScore >= 5) {
-            clearContext?.markAsCleared(`music_${difficulty}`);
+          clearContext?.markAsCleared(`music_${difficulty}`);
         }
 
         // 정답 시 1초 동안 Rive 애니메이션을 표시하고, 이후 다음 문제로 진행
@@ -515,7 +608,7 @@ export default function Music() {
 
   // 52개 음 전체를 하나의 연속된 건반으로 그리되 뷰포트에서 보여줄 영역 슬라이싱
   const pianoNotes = allNotes;
-  
+
   const CONTROL_PANEL_WIDTH = 240;
   const PIANO_AREA_PADDING = 20;
   const pianoAreaWidth = width - CONTROL_PANEL_WIDTH - PIANO_AREA_PADDING;
@@ -529,7 +622,7 @@ export default function Music() {
   };
 
   const handlers = { handleNotePressIn, handleNotePressOut };
-  
+
   const progressItems = difficultyLevels.map(level => {
     const levelProgress = progress[level.name] || { cumulativeSuccesses: 0, highestScore: 0 };
     const starStatus = starContext?.starData[`music_${level.name}`] ? '★' : '☆';
@@ -564,8 +657,8 @@ export default function Music() {
       <View style={styles.trainingContainer}>
         <Text style={styles.scoreText}>점수: {score}</Text>
         <View style={styles.buttonContainer}>
-          <TouchableOpacity 
-            style={styles.trainingButton} 
+          <TouchableOpacity
+            style={styles.trainingButton}
             onPress={isTraining ? stopTraining : startTraining}
           >
             <Text style={styles.buttonText}>{isTraining ? '훈련 종료' : '청능 훈련'}</Text>
@@ -580,7 +673,7 @@ export default function Music() {
         <View style={styles.difficultyContainerWrapper}>
           <View style={styles.difficultyContainer}>
             {difficultyLevels.map(({ name, label }) => (
-              <TouchableOpacity 
+              <TouchableOpacity
                 key={name}
                 style={[styles.difficultyButton, difficulty === name && styles.difficultyButtonActive]}
                 onPress={() => !isTraining && setDifficulty(name)}
@@ -596,8 +689,8 @@ export default function Music() {
       <View style={styles.pianoArea}>
         {/* 옥타브 시프트 슬라이딩 네비게이션 */}
         <View style={styles.octaveController}>
-          <TouchableOpacity 
-            style={[styles.octaveBtn, viewportStartIdx === 0 && styles.octaveBtnDisabled]} 
+          <TouchableOpacity
+            style={[styles.octaveBtn, viewportStartIdx === 0 && styles.octaveBtnDisabled]}
             onPress={handleShiftLeft}
             disabled={viewportStartIdx === 0}
           >
@@ -607,8 +700,8 @@ export default function Music() {
           <View style={styles.octaveIndicator}>
             <Text style={styles.octaveIndicatorText}>현재 범위: {getViewportRangeLabel()}</Text>
           </View>
-          <TouchableOpacity 
-            style={[styles.octaveBtn, viewportStartIdx === 16 && styles.octaveBtnDisabled]} 
+          <TouchableOpacity
+            style={[styles.octaveBtn, viewportStartIdx === 16 && styles.octaveBtnDisabled]}
             onPress={handleShiftRight}
             disabled={viewportStartIdx === 16}
           >
@@ -620,11 +713,11 @@ export default function Music() {
         <View style={styles.pianoContainer}>
           <View style={styles.pianoWrapper}>
             {renderPianoViewportRow(
-              pianoNotes, 
-              visibleNoteSet, 
-              activeNotes, 
-              handlers, 
-              dynamicStyles, 
+              pianoNotes,
+              visibleNoteSet,
+              activeNotes,
+              handlers,
+              dynamicStyles,
               KEYBOARD_ENABLED,
               viewportStartIdx,
               VIEWPORT_SIZE
@@ -678,27 +771,27 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 80,
   },
-  fullScreen: { 
-    flex: 1, 
+  fullScreen: {
+    flex: 1,
     backgroundColor: '#333',
     flexDirection: 'row',
   },
-  trainingContainer: { 
+  trainingContainer: {
     width: 240,
     height: '100%',
-    paddingVertical: 20, 
-    paddingHorizontal: 10, 
-    backgroundColor: '#222', 
-    alignItems: 'center', 
+    paddingVertical: 20,
+    paddingHorizontal: 10,
+    backgroundColor: '#222',
+    alignItems: 'center',
     justifyContent: 'space-around',
-    borderRightWidth: 2, 
+    borderRightWidth: 2,
     borderRightColor: '#444',
   },
-  pianoArea: { 
+  pianoArea: {
     flex: 1,
     flexDirection: 'column',
-    justifyContent: 'center', 
-    alignItems: 'center', 
+    justifyContent: 'center',
+    alignItems: 'center',
     paddingTop: 10,
   },
   octaveController: {
@@ -741,16 +834,16 @@ const styles = StyleSheet.create({
   difficultyContainerWrapper: {
     width: '100%',
   },
-  difficultyContainer: { 
-    flexDirection: 'row', 
-    flexWrap: 'wrap', 
+  difficultyContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'center',
   },
-  buttonContainer: { 
+  buttonContainer: {
     flexDirection: 'column',
     alignItems: 'center',
   },
-  pianoContainer: { 
+  pianoContainer: {
     flex: 1,
     width: '100%',
     justifyContent: 'center',
@@ -758,68 +851,82 @@ const styles = StyleSheet.create({
   },
   pianoWrapper: {
     justifyContent: 'center',
-    alignItems: 'center', 
-  },
-  rowContainer: { 
-    flexDirection: 'row', 
-    position: 'relative', 
-    marginVertical: 8, 
-  },
-  difficultyButton: { 
-    backgroundColor: '#555', 
-    paddingVertical: 8, 
-    paddingHorizontal: 15, 
-    borderRadius: 15, 
-    margin: 4, 
-  },
-  trainingButton: { 
-    backgroundColor: '#007BFF', 
-    paddingVertical: 12, 
-    paddingHorizontal: 18, 
-    borderRadius: 8, 
-    marginVertical: 6, 
-    width: 200, 
     alignItems: 'center',
   },
-  difficultyButtonText: { 
-    color: 'white', 
-    fontWeight: '600', 
-    fontSize: 14, 
+  rowContainer: {
+    flexDirection: 'row',
+    position: 'relative',
+    marginVertical: 8,
   },
-  scoreText: { 
-    fontSize: 22, 
-    fontWeight: 'bold', 
+  difficultyButton: {
+    backgroundColor: '#555',
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    borderRadius: 15,
+    margin: 4,
+  },
+  trainingButton: {
+    backgroundColor: '#007BFF',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    marginVertical: 6,
+    width: 200,
+    alignItems: 'center',
+  },
+  difficultyButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  scoreText: {
+    fontSize: 22,
+    fontWeight: 'bold',
     color: 'white',
     textAlign: 'center',
   },
-  feedbackText: { 
-    fontSize: 18, 
-    color: '#4CAF50', 
-    fontWeight: 'bold', 
-    minHeight: 50, 
+  feedbackText: {
+    fontSize: 18,
+    color: '#4CAF50',
+    fontWeight: 'bold',
+    minHeight: 50,
     textAlign: 'center',
   },
-  buttonText: { 
-    color: 'white', 
-    fontWeight: 'bold',   
-    fontSize: 16 
+  buttonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16
   },
-  whiteKey: { 
-    borderWidth: 1, 
-    borderColor: '#000', 
-    backgroundColor: 'white', 
-    justifyContent: 'flex-end', 
-    alignItems: 'center', 
-    paddingBottom: 15, 
+  whiteKey: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: 'white',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingBottom: 15,
+    // 2.5D 입체감 그림자
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 4,
+    elevation: 10,
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
   },
-  blackKey: { 
-    position: 'absolute', 
-    backgroundColor: 'black', 
-    borderRadius: 4, 
-    zIndex: 1, 
-    justifyContent: 'flex-end', 
-    alignItems: 'center', 
+  blackKey: {
+    position: 'absolute',
+    backgroundColor: 'black',
+    borderRadius: 4,
+    zIndex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
     paddingBottom: 12,
+    // 2.5D 입체감 그림자
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 5,
+    elevation: 15,
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 4,
   },
   keyTextLabel: {
     fontSize: 14,
@@ -833,44 +940,44 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 4,
   },
-  whiteKeyLabel: { 
-    fontSize: 11, 
-    color: '#888', 
-    fontWeight: '600' 
+  whiteKeyLabel: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '600'
   },
-  blackKeyLabel: { 
-    fontSize: 10, 
-    color: '#888', 
-    fontWeight: '600' 
+  blackKeyLabel: {
+    fontSize: 10,
+    color: '#888',
+    fontWeight: '600'
   },
-  difficultyButtonActive: { 
-    backgroundColor: '#007BFF', 
-    shadowColor: '#007BFF', 
-    shadowOffset: { width: 0, height: 0 }, 
-    shadowOpacity: 0.5, 
-    shadowRadius: 5, 
-    elevation: 5 
+  difficultyButtonActive: {
+    backgroundColor: '#007BFF',
+    shadowColor: '#007BFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 5,
+    elevation: 5
   },
-  whiteKeyPressed: { 
-    backgroundColor: '#e0e0e0' 
+  whiteKeyPressed: {
+    backgroundColor: '#e0e0e0'
   },
-  blackKeyPressed: { 
-    backgroundColor: '#333333' 
+  blackKeyPressed: {
+    backgroundColor: '#333333'
   },
   whiteKeyDisabled: {
     backgroundColor: '#c4c4c4',
     borderColor: '#888',
   },
-  keyDisabled: { 
+  keyDisabled: {
     opacity: 0.4,
   },
   keyLabelDisabled: {
     color: '#777',
   },
-  hiddenInput: { 
-    position: 'absolute', 
-    width: 1, 
-    height: 1, 
-    opacity: 0 
+  hiddenInput: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    opacity: 0
   },
 });

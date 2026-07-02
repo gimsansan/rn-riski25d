@@ -5,7 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming, Easing, withSequence } from 'react-native-reanimated';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import MugicPage from './existing_file/index'
+import MugicPage from './screens/MusicScreen'
 // Hooks
 import { useParallax } from './hooks/useParallax';
 

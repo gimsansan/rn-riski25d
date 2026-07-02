@@ -39,3 +39,5 @@ If a later question revisits the same decision from a different angle, explicitl
 
 Always separate "what is ideal in principle" from "what I actually recommend given current, real-world constraints," and never let these two read as if they contradict each other. When the ideal and the practical recommendation differ, state both plainly in the same place.
 8) walkthrough.md 를 너가 생성하면 나에게 묻지 말고 항상 저장을 해
+9) android 모바일 앱이므로, ios 관련 코드는 불필요함.
+10) 문서 갱신 시는  walkthrough.md, implementation_plan.md 둘 다 해줘.

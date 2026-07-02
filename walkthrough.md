@@ -48,7 +48,7 @@
   - `useAutoFocusViewport` 훅을 개발하여, `currentNote` 변경 시 해당 정답 음이 화면 중앙에 보이도록 `viewportStartIdx` 시작 값을 `[0, 16]` 범위(백건 30개 기준) 내에서 알아서 자동 갱신해 줍니다.
   - 뷰포트의 상태를 `startRef`로 분리 및 의존성 설정을 격리하여, 추후 구현될 미니맵 터치 수동 이동과 서로 뷰포트 상태가 꼬여 락(Lock)이 걸리는 충돌을 예방했습니다.
 - **Rive 런타임 크래시 방지 조치:**
-  - Expo Go 환경 구동 시 네이티브 패키지 미지원으로 생기는 크래시 에러를 예방하기 위해 [index.tsx](file:///d:/Projects/rn-riski25d/existing_file/index.tsx) 내의 Rive 임포트 및 렌더링 구역을 임시 주석 처리해 비활성화했습니다.
+  - Expo Go 환경 구동 시 네이티브 패키지 미지원으로 생기는 크래시 에러를 예방하기 위해 [MusicScreen.tsx](file:///d:/Projects/rn-riski25d/screens/MusicScreen.tsx) 내의 Rive 임포트 및 렌더링 구역을 임시 주석 처리해 비활성화했습니다.
 - **메인 엔트리 연동 ([App.tsx](file:///d:/Projects/rn-riski25d/App.tsx)):**
   - 앱 기동 시 기존 24음 피아노 화면 대신, 새로 완성된 52음 옥타브 시프트 및 오토 포커스 훈련 피아노 화면(`MugicPage`)이 메인 화면에 띄워지도록 렌더링 라우팅 대상을 완전히 스위칭 완료했습니다.
 
@@ -57,3 +57,11 @@
 ## 🧪 검증 및 빌드 결과
 - **TypeScript 타입 체크:** `npx tsc --noEmit` 검증이 단 한 개의 오류 없이 깨끗하게 **성공 및 통과**되었습니다.
 - **플레이어 동작 상태:** 에뮬레이터에서 튕김 현상 없이 옥타브 시프트 피아노 UI가 정상 로드되며, 화면 밖에 위치한 음이 재생될 때 뷰포트가 해당 옥타브 대역으로 즉시 오토 시프트(순간 이동)함을 성공적으로 확인했습니다.
+
+---
+
+## 🎯 Phase 5: 2.5D 타격감 및 Haptics 진동 적용 완료
+- **햅틱 피드백 추가:** `expo-haptics` 패키지를 연동하여 건반을 누를 때마다 `Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)`를 호출, 가벼운 물리 진동 타격감을 부여했습니다.
+- **2.5D Y축 프레스 애니메이션:** 
+  - 각 건반(`PianoKey`) 단위로 개별 `useSharedValue`를 활용해, UI 스레드 상에서 60fps 이상의 부드러운 눌림 애니메이션을 적용했습니다.
+  - 건반 터치 시 백건은 14px, 흑건은 18px 아래로 하강하며 그림자 투명도가 자연스럽게 조절되어 입체적인 타격감을 구현했습니다.
