@@ -1,4 +1,4 @@
-import { createAudioPlayer, setAudioModeAsync, AudioPlayer, preload } from 'expo-audio';
+import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
 
 // Metro Bundler는 동적 require를 허용하지 않으므로 24개 파일을 명시적으로 매핑합니다.
 const soundFiles = [
@@ -35,26 +35,30 @@ class SoundManager {
   async init() {
     if (this.isLoaded) return;
     
-    // 오디오 모드 설정 (레이턴시 최소화, iOS 무음 모드 무시)
-    await setAudioModeAsync({
-      playsInSilentMode: true,
-      shouldPlayInBackground: false,
-      interruptionMode: 'mixWithOthers',
-    });
+    try {
+      // 오디오 모드 설정 (레이턴시 최소화, iOS 무음 모드 무시)
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: false,
+        interruptionMode: 'mixWithOthers',
+      });
 
-    // 24개 사운드 병렬 프리로드
-    const loadPromises = soundFiles.map(async (file, index) => {
-      try {
-        await preload(file);
-        this.soundObjects[index] = createAudioPlayer(file);
-      } catch (e) {
-        console.warn(`Failed to load sound index ${index}`, e);
-      }
-    });
+      // 24개 사운드 즉시 초기화 (로컬 require 리소스는 즉시 로드됨)
+      soundFiles.forEach((file, index) => {
+        try {
+          this.soundObjects[index] = createAudioPlayer(file);
+        } catch (e) {
+          console.warn(`Failed to create audio player for index ${index}`, e);
+        }
+      });
 
-    await Promise.all(loadPromises);
-    this.isLoaded = true;
-    console.log('All piano sounds preloaded successfully!');
+      this.isLoaded = true;
+      console.log('All piano sounds initialized successfully!');
+    } catch (e) {
+      console.error('Failed to initialize SoundManager', e);
+      // 에러가 발생해도 로딩 인디케이터가 영원히 멈추는 것을 방지하기 위해 완료 처리
+      this.isLoaded = true;
+    }
   }
 
   async play(index: number) {
@@ -77,7 +81,7 @@ class SoundManager {
   async unloadAll() {
     this.soundObjects.forEach((sound) => {
       if (sound) {
-        sound.remove();
+        sound.release();
       }
     });
     this.isLoaded = false;

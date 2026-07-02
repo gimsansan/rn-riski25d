@@ -4,6 +4,17 @@ import { Canvas, RoundedRect, LinearGradient, vec, Shadow } from '@shopify/react
 import { useSharedValue, useDerivedValue, SharedValue } from 'react-native-reanimated';
 import SoundManager from './SoundManager';
 
+const whiteToChromatic = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19, 21, 23];
+const blackToChromatic = [1, 3, 6, 8, 10, 13, 15, 18, 20, 22];
+
+const getChromaticIndex = (keyIdx: number): number => {
+  if (keyIdx < 14) {
+    return whiteToChromatic[keyIdx];
+  } else {
+    return blackToChromatic[keyIdx - 14];
+  }
+};
+
 interface PianoKeyboardProps {
   width: number;
   height: number;
@@ -120,7 +131,8 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({ width, height }) =
     // 새롭게 눌린 키 소리 재생
     newKeysThisFrame.forEach(keyIdx => {
       if (!playingKeysRef.current.has(keyIdx)) {
-        SoundManager.play(keyIdx);
+        const chromaticIdx = getChromaticIndex(keyIdx);
+        SoundManager.play(chromaticIdx);
       }
     });
 
