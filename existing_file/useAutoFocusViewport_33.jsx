@@ -2,27 +2,33 @@
  * useAutoFocusViewport.jsx
  * ------------------------------------------------------------------
  * 자동 옥타브 포커싱 (Auto-Focus Viewport)
- * 2.5D 청능 피아노 앱 · React Native (Expo SDK 57)
+ * 2.5D 청능 피아노 앱 · React Native (Expo SDK 57) · Reanimated
  *
  * 동작: 새 문제(currentNote)가 바뀌면, 그 음이 현재 14개 백건 뷰포트
  *       안에 있는지 검사하고, 밖이라면 그 음이 화면 중앙에 오도록
- *       viewportStartIdx(= slice 시작값)를 계산해 갱신한다.
+ *       viewportStartIdx를 계산해 부드럽게 슬라이드 이동시킨다.
  *
- * ─ 확정된 실제 코드 사실(A1~A4) ─
- *  A1. currentNote = 'C4' / 'C#4' 형태의 "문자열".
- *  A2. viewportStartIdx = 백건 배열 인덱스(백건 30개, 뷰포트 14개 → 0~16).
- *  A3. 렌더링 = whites.slice(start, start+size)로 14개만 그림.
- *      → translateX 슬라이드가 아니라 slice 시작값을 target으로 즉시 갱신.
- *  A4. whiteKeyWidth = pianoAreaWidth / VIEWPORT_SIZE (렌더 폭 상수).
- *      → 포커싱 로직 자체는 픽셀값이 필요 없어 이 훅에서는 쓰지 않음.
- *
- *  ※ 현재 방식은 "즉시 점프"다. 원래 기획(지시6)의 "부드러운 슬라이딩"이
- *    필요하면 렌더 구조를 translateX 트랙 기반으로 리팩토링해야 한다(별건).
+ * ─ 통합 시 확인해야 할 가정(Assumption) ─
+ *  A1. currentNote 형태: "C#4" 문자열 / {name:'C#',octave:4} 객체 /
+ *      0~51 인덱스 중 무엇이든 허용(resolveNoteId 참고).
+ *  A2. viewportStartIdx = "백건 배열 인덱스"(백건 30개, 뷰포트 14개 → 0~16).
+ *      전체 52음 인덱스 기준이라면 매핑을 바꿔야 함.  ← 아직 미확인
+ *  A3. 건반 렌더링 = "전체 트랙을 그려두고 translateX로 밀어 14개만
+ *      보이는" 구조로 가정. 14개만 slice해서 그린다면 translateX 대신
+ *      slice 시작값에 target을 적용.  ← 아직 미확인
+ *  A4. whiteKeyWidth(백건 1개 폭, px)를 상수로 주입. 보통 screenWidth/14.
  * ------------------------------------------------------------------
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { View } from 'react-native';
+import { View, Dimensions } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  Easing,
+  runOnJS,
+} from 'react-native-reanimated';
 
 /* ══════════════════════════════════════════════════════════════
  * SECTION 1 · 건반 모델 (self-contained, 외부 파일 의존 없음)
@@ -40,6 +46,7 @@ const toSemitone = (name, octave) => octave * 12 + pitchClass(name);
  *   notes: Array<{id,name,octave,isBlack,semitone}>,   // 52개
  *   whites: Array<{id,name,octave}>,                    // 30개
  *   whiteIdxRefById: Map<string, number>,               // 음 → 포커싱용 백건 인덱스
+ *   idByIndex: (n:number)=>string|null,                 // 0~51 인덱스 → id
  * }}
  */
 export function buildKeyboard(
@@ -73,11 +80,16 @@ export function buildKeyboard(
     }
   }
 
-  return { notes, whites, whiteIdxRefById };
+  return {
+    notes,
+    whites,
+    whiteIdxRefById,
+    idByIndex: (n) => notes[n]?.id ?? null,
+  };
 }
 
 /* ══════════════════════════════════════════════════════════════
- * SECTION 2 · 포커싱 계산 (순수 함수)
+ * SECTION 2 · 포커싱 계산 (순수 함수 · 애니메이션과 무관)
  * ════════════════════════════════════════════════════════════ */
 
 /**
@@ -95,95 +107,128 @@ export function computeFocusStart(noteWhiteIdx, currentStart, viewportSize, tota
   return Math.max(0, Math.min(centered, maxStart)); // 중앙 정렬 + 경계 clamp
 }
 
-/** currentNote를 canonical id로 변환 (A1: 실제로는 'C4' 같은 문자열) */
-function resolveNoteId(currentNote) {
-  if (typeof currentNote === 'string') return currentNote;      // 'C4', 'C#4'
-  if (currentNote?.name != null && currentNote?.octave != null) {
-    return `${currentNote.name}${currentNote.octave}`;          // 객체 대비 fallback
+/** currentNote(문자열/객체/인덱스)를 canonical id("C#4")로 변환 (A1) */
+function resolveNoteId(currentNote, keyboard) {
+  if (currentNote == null) return null;
+  if (typeof currentNote === 'number') return keyboard.idByIndex(currentNote);
+  if (typeof currentNote === 'string') return currentNote; // "C#4" 형태 가정
+  if (currentNote.name != null && currentNote.octave != null) {
+    return `${currentNote.name}${currentNote.octave}`;
   }
   return null;
 }
 
 /* ══════════════════════════════════════════════════════════════
- * SECTION 3 · 훅  (slice 시작값만 갱신)
+ * SECTION 3 · 훅
  * ════════════════════════════════════════════════════════════ */
 
 export function useAutoFocusViewport({
-  currentNote,          // 현재 출제된 음 문자열 (A1)
-  viewportStartIdx,     // 현재 slice 시작 백건 인덱스 (state, A2)
-  setViewportStartIdx,  // 위 state setter
-  keyboard,             // buildKeyboard() 결과
+  currentNote,            // 현재 출제된 음 (A1)
+  viewportStartIdx,       // 현재 뷰포트 시작 백건 인덱스 (state, A2)
+  setViewportStartIdx,    // 위 state setter
+  whiteKeyWidth,          // 백건 1개 폭 px (A4)
+  keyboard,               // buildKeyboard() 결과
   viewportSize = 14,
+  duration = 450,
 }) {
   const totalWhite = keyboard.whites.length; // 30
-  // 논리적 현재 시작값. 자동 포커싱을 currentNote 변경에만 반응시키고,
-  // 미니맵 등 "수동 이동"과 충돌하지 않도록 최신 start를 ref로 읽는다.
+  // translateX: 트랙을 왼쪽으로 밀어 현재 뷰포트를 보여줌 (A3)
+  const translateX = useSharedValue(-viewportStartIdx * whiteKeyWidth);
+  // 논리적 현재 시작값(빠른 연속 문제에서도 정확히 계산하기 위한 ref)
   const startRef = useRef(viewportStartIdx);
 
-  // 어떤 경로로든 viewportStartIdx가 바뀌면 ref를 최신으로 유지
+  // (1) 새 문제가 나올 때마다 포커싱
   useEffect(() => {
-    startRef.current = viewportStartIdx;
-  }, [viewportStartIdx]);
-
-  // 새 문제가 나올 때만 포커싱 (수동 이동 시엔 재실행되지 않음)
-  useEffect(() => {
-    const id = resolveNoteId(currentNote);
+    const id = resolveNoteId(currentNote, keyboard);
     if (id == null) return;
     const noteWhiteIdx = keyboard.whiteIdxRefById.get(id);
-    if (noteWhiteIdx == null) return; // 범위 밖 음 → 무시
+    if (noteWhiteIdx == null) return;
 
     const base = startRef.current;
     const target = computeFocusStart(noteWhiteIdx, base, viewportSize, totalWhite);
     if (target === base) return; // 이미 보임 → 이동 없음
 
-    startRef.current = target;      // 즉시 논리 위치 갱신(연속 출제 대비)
-    setViewportStartIdx(target);    // slice 시작값 갱신 → 리렌더로 새 14개 노출
-    // currentNote만 의존
+    startRef.current = target; // 즉시 논리 위치 갱신(연속 출제 대비)
+    translateX.value = withTiming(
+      -target * whiteKeyWidth,
+      { duration, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        'worklet';
+        if (finished) runOnJS(setViewportStartIdx)(target); // 미니맵 등 외부 동기화
+      },
+    );
+    // currentNote만 의존: 문제가 바뀔 때만 실행
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentNote]);
+
+  // (2) 외부(미니맵 #10 등)에서 viewportStartIdx를 직접 바꾼 경우 동기화
+  useEffect(() => {
+    if (viewportStartIdx === startRef.current) return; // 자기 자신이 낸 변경 → 무시
+    startRef.current = viewportStartIdx;
+    translateX.value = withTiming(-viewportStartIdx * whiteKeyWidth, {
+      duration,
+      easing: Easing.out(Easing.cubic),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewportStartIdx]);
+
+  // 트랙에 붙일 애니메이션 스타일
+  const trackStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
+
+  return { translateX, trackStyle };
 }
 
 /* ══════════════════════════════════════════════════════════════
- * SECTION 4 · 사용 예시 (실제 코드와 동일한 slice 방식)
- *   건반 렌더러는 자리표시자 View임. 실제로는 Skia 건반으로 교체.
+ * SECTION 4 · 사용 예시
+ *   건반 렌더러는 "자리표시자 View"임. 실제로는 당신의 Skia 건반으로 교체.
+ *   (이 예시만으로도 슬라이드 동작은 바로 확인 가능)
  * ════════════════════════════════════════════════════════════ */
 
 const VIEWPORT_KEYS = 14;
 
 export function KeyboardScreen({ currentNote }) {
-  const keyboard = useMemo(() => buildKeyboard(), []); // C1 ~ D#5
+  const { width } = Dimensions.get('window');
+  const whiteKeyWidth = width / VIEWPORT_KEYS;          // A4
+  const keyboard = useMemo(() => buildKeyboard(), []);  // C1 ~ D#5
+
   const [viewportStartIdx, setViewportStartIdx] = useState(0);
 
-  // 새 문제가 화면 밖이면 viewportStartIdx를 자동으로 맞춰줌
-  useAutoFocusViewport({
+  const { trackStyle } = useAutoFocusViewport({
     currentNote,
     viewportStartIdx,
     setViewportStartIdx,
+    whiteKeyWidth,
     keyboard,
     viewportSize: VIEWPORT_KEYS,
   });
 
-  // A3: 실제 코드와 동일한 slice 윈도잉
-  const visibleWhiteKeys = keyboard.whites.slice(
-    viewportStartIdx,
-    viewportStartIdx + VIEWPORT_KEYS,
-  );
+  const trackWidth = keyboard.whites.length * whiteKeyWidth; // 30 * w
 
   return (
-    <View style={{ flexDirection: 'row' }}>
-      {/* ↓↓↓ 자리표시자. 실제로는 여기에 Skia 건반 렌더러 */}
-      {visibleWhiteKeys.map((w) => (
-        <View
-          key={w.id}
-          style={{
-            flex: 1,
-            height: 180,
-            borderRightWidth: 1,
-            borderColor: '#222',
-            backgroundColor: '#fafafa',
-          }}
-        />
-      ))}
+    // 뷰포트: 14개만 보이도록 overflow hidden
+    <View style={{ width, overflow: 'hidden' }}>
+      <Animated.View
+        style={[{ width: trackWidth, flexDirection: 'row' }, trackStyle]}
+      >
+        {/*
+          ↓↓↓ 여기를 당신의 Skia 건반 렌더러로 교체하세요.
+          지금은 백건 30개 자리표시자만 그림. 흑건은 Skia에서 겹쳐 그리면 됨.
+        */}
+        {keyboard.whites.map((w) => (
+          <View
+            key={w.id}
+            style={{
+              width: whiteKeyWidth,
+              height: 180,
+              borderRightWidth: 1,
+              borderColor: '#222',
+              backgroundColor: '#fafafa',
+            }}
+          />
+        ))}
+      </Animated.View>
     </View>
   );
 }
