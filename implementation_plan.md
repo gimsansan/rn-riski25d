@@ -189,3 +189,77 @@
   - 추후 메인 앱(부모 앱)에 모듈로 이식될 때 부모의 '하단 탭 바'가 차지하는 높이만큼 모듈 전체의 가용 `height`가 줄어들게 됩니다.
   - 이를 대비해 피아노 건반 높이를 `whiteKeyHeight: height - BOTTOM_PANEL_HEIGHT(115) - 90` 공식으로 계산하도록 구현했습니다.
   - 이 수학적 비율 계산 덕분에 부모 탭 바 높이가 차감되더라도 상단 옥타브 컨트롤러 영역이나 하단 훈련 제어반 레이아웃이 침범당하지 않으며, 피아노 건반 부분만 `flex: 1` 기반으로 비율에 맞게 안전하게 축소되어 깨짐 없는 완벽한 이식을 보장합니다.
+## 🎵 Phase 11: 낙하노트 엔진 (Falling Note Track) 격리 구현
+
+청능(청각) 개선 및 치료 목적을 위한 다감각(시각+청각+운동) 훈련의 핵심 기능인 "낙하노트(Falling Note)" 엔진을 구현합니다.
+인계문(`청능앱_낙하노트_인계.md`)의 실무 권장 지침("골격 먼저, 레이어 나중")에 따라, 기존 복잡한 `App.tsx`에 바로 병합하지 않고 **별도의 독립 컴포넌트로 완전히 격리하여 우선 구현 및 검증**합니다.
+
+### 1. 설계 확정 사항 (고급 모델 피드백 반영)
+
+1. **테스트 화면 격리 방식 (Early-Return DEV Flag):**
+   - `App.tsx` 내에 상태를 섞는 토글 버튼 대신, 파일 최상단에 `const ENABLE_FALLING_NOTE_TEST = true;` 데브 플래그를 두고 early-return 방식으로 화면 전체를 데모로 스왑합니다. 이를 통해 기존 훈련 상태 및 오디오와 전혀 얽히지 않는 순수 격리 검증을 달성합니다.
+2. **관심사 분리 및 오디오 스케줄링 (Event Emission):**
+   - 트랙 컴포넌트 안에서 직접 소리를 내지 않습니다.
+   - 단순한 `onNoteHit`(판정선 닿았을 때 방출)를 넘어, **"귀 먼저(Sound First)"** 모드를 위해 부모가 `beat - audioOffset` 시점에 미리 소리를 스케줄할 수 있도록 **예정 시각(Scheduled Time)을 알려주는 방식**의 이벤트를 설계합니다.
+3. **시계(Clock) 동기화:**
+   - 시각-청각 드리프트(어긋남)를 막기 위해 `currentTime`은 Reanimated의 `useFrameCallback`이 제공하는 `frame.timestamp`와 동일한 시계를 공유하여 애니메이션과 오디오 스케줄링을 일치시킵니다.
+
+### Proposed Changes
+
+#### [NEW] [components/FallingNoteTrack.tsx](file:///d:/Projects/rn-riski25d/components/FallingNoteTrack.tsx)
+- `data/songs.ts`에서 전달받은 `Song` 데이터를 Props로 수신.
+- `useFrameCallback`을 활용해 재생 시간(`currentTime`)을 정밀 추적 (bpm 72 기준).
+- 수수한 톤의 가로 레인(Lane), 노트 블록, 하단 판정선(Judgment Line) 렌더링.
+- 노트의 `beat` 정보와 `leadBeats`를 비교하여 Y 좌표를 동적 계산.
+- 판정선 도달 예정 시각을 부모에게 스케줄할 수 있는 구조로 콜백 방출.
+
+#### [MODIFY] [App.tsx](file:///d:/Projects/rn-riski25d/App.tsx)
+- 최상단에 `const ENABLE_FALLING_NOTE_TEST = false;` 플래그 추가.
+- 해당 플래그가 `true`일 경우 기존 피아노 뷰 대신 `FallingNoteTrack` 컴포넌트를 즉시 렌더링 (단일 데모 화면 스왑).
+
+### Verification Plan
+- `ENABLE_FALLING_NOTE_TEST = true` 설정 후 앱 새로고침 시 데모 화면이 뜨는지 확인.
+- `bpm 72` 기준으로 노트들이 상단에서 생성되어 하단 판정선까지 등속으로 일정한 타이밍에 하강하는지 확인.
+- 부모 컴포넌트(`App.tsx`)가 예정된 타이밍에 맞춰 정확히 오디오 재생 호출을 스케줄링할 수 있는지 콜백 및 로그 확인.
+
+### 🐛 Hotfix 반영
+- **구문 오류 수정:** `components/FallingNoteTrack.tsx` 내 `useDerivedValue` import 위치 문제(Syntax Error)를 파일 최상단으로 이동하여 수정.
+- **타입 오류 수정:** `@shopify/react-native-skia`에서 지원하지 않는 `Rect`의 `r`(둥근 모서리) 속성 에러를 해결하기 위해 `Rect`를 `RoundedRect` 컴포넌트로 교체했습니다.
+
+## 🎵 Phase 12: 낙하노트 메인 앱 통합 및 상호작용(Audio/Touch) 구현 (계획)
+
+낙하노트 뼈대(Phase 11) 검증이 완료됨에 따라, 이를 실제 피아노 UI와 오디오 시스템이 존재하는 `App.tsx`에 병합하고 사용자 터치 판정 로직을 연결합니다.
+
+### 1. 주요 구현 사양
+
+1. **메인 UI 병합 및 건반 정렬 (Visual Alignment):**
+   - `ENABLE_FALLING_NOTE_TEST` 조기 반환(Early Return) 플래그를 제거하여 메인 앱 로직과 결합.
+   - `FallingNoteTrack`을 피아노 건반 영역과 맞물리도록 배치.
+   - 트랙의 레인 폭(`laneWidth`)과 X 좌표를 `App.tsx`의 동적 건반 폭(`dynamicWhiteKeyWidth`) 및 뷰포트 시작 인덱스와 완벽하게 일치시킴 (백건 기준으로 하강).
+
+2. **오디오 스케줄링 및 '귀 먼저(Sound First)' 모드:**
+   - `App.tsx`에서 `onNoteSchedule(note, expectedTimestamp)` 이벤트를 수신.
+   - `Date.now()` 기준으로 `expectedTimestamp - audioOffset` 시점에 `setTimeout`을 통해 오디오 재생을 사전 예약.
+   - `audioOffset`이 0이면 판정선 도달 시 동시 재생, 양수(예: 500ms)이면 시각적 도달보다 먼저 소리가 남.
+
+3. **터치 판정 (Hit Detection) 로직:**
+   - 사용자가 피아노 건반을 터치(`handleNotePressIn`)할 때, 현재 시각과 떨어지고 있는 노트들의 예상 도달 시각을 대조.
+   - 오차 범위(예: ±300ms) 내에 일치하는 건반 터치 시 **Hit(정답)** 판정:
+     - 점수 상승 및 별자리 이펙트 발동.
+     - `FallingNoteTrack`에 해당 노트를 명시적으로 소멸(히트 이펙트)시키도록 신호 전달.
+   - 범위를 벗어나거나 엉뚱한 건반을 누르면 **Miss(오답)** 판정 (피드백 출력).
+
+### User Review Required
+> [!IMPORTANT]
+> - **'귀 먼저' 모드 오디오 재생 피드백:** '귀 먼저' 모드에서는 노트가 판정선에 닿기 전에 소리가 먼저 나옵니다. 사용자가 타이밍에 맞춰 정답 터치를 성공했을 때, **타격감을 위해 소리를 한 번 더 재생**할지, 아니면 **시각적 이펙트(별자리 등)와 물리 진동(햅틱)만** 주고 소리는 생략할지 결정이 필요합니다. (기본 제안: 터치 시 소리 한 번 더 재생하여 다감각 피드백 유지)
+
+### Proposed Changes
+
+#### [MODIFY] [App.tsx](file:///d:/Projects/rn-riski25d/App.tsx)
+- `FallingNoteTrack` 렌더링을 배경 레이어 앞, 피아노 영역 뒤에 병합.
+- 건반 너비(`dynamicWhiteKeyWidth`) 및 오프셋 좌표를 Props로 전달.
+- 오디오 스케줄링 예약 및 건반 터치 시 히트 판정(Hit/Miss) 상태 관리.
+
+#### [MODIFY] [components/FallingNoteTrack.tsx](file:///d:/Projects/rn-riski25d/components/FallingNoteTrack.tsx)
+- Props로 받은 좌표계를 사용해 건반과 동일한 위치에 노트가 떨어지도록 `getLaneX` 등 수정.
+- Hit된 노트를 화면에서 감추거나 파괴되는 애니메이션을 추가하기 위한 상태 연동.

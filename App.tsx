@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAudioPlayer, setAudioModeAsync, AudioPlayer } from 'expo-audio';
@@ -34,6 +35,10 @@ import { RippleLayer } from './components/RippleLayer';
 import { ParticleVisualizer, ParticleVisualizerRef } from './components/ParticleVisualizer';
 import { randomSkyPoint } from './components/SoundConstellation';
 import { MiniKeyboardMap } from './components/MiniKeyboardMap';
+import { FallingNoteTrack } from './components/FallingNoteTrack';
+import { songs, Song } from './data/songs';
+
+
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -100,6 +105,9 @@ allNotes.forEach(note => {
     whiteCount++;
   }
 });
+
+const whiteIdxMap: Record<string, number> = {};
+whiteIdxRefById.forEach((val, key) => { whiteIdxMap[key] = val; });
 
 const computeFocusStart = (noteWhiteIdx: number, currentStart: number, viewportSize: number, totalWhite: number) => {
   // 14건반 페이지 스냅에 맞춘 포커싱 처리
@@ -385,6 +393,7 @@ const renderPianoViewportRow = (
 };
 
 export default function App() {
+
   const KEYBOARD_ENABLED = false;
   const VISUALIZER_MODE: 'ripple' | 'particle' = 'particle'; // 스위치 제공 ('ripple'로 변경 시 이전 물결로 복구)
   const SHOW_ANSWER_HINT = true; // 테스트용 정답 힌트 노출 스위치 (true 활성화 / false 비활성화)
@@ -399,6 +408,25 @@ export default function App() {
   const [difficulty, setDifficulty] = useState<Difficulty>('3단계');
   const [progress, setProgress] = useState<MusicProgress>({});
   const [showMissionSuccess, setShowMissionSuccess] = useState(false);
+
+  // 낙하노트 모드 상태 관리
+  const [currentSong, setCurrentSong] = useState<Song | null>(null);
+  const scheduledNotesRef = useRef<{ note: Note; expectedTimestamp: number; hit: boolean; beat: number }[]>([]);
+  const [hitNoteIds, setHitNoteIds] = useState<string[]>([]);
+  const [soundFirstOffset, setSoundFirstOffset] = useState(0); // '귀 먼저' 모드 (기본 0, 옵션으로 500ms 등)
+
+  const handleNoteSchedule = useCallback((note: Note, expectedTimestamp: number, beat: number) => {
+    const playTime = expectedTimestamp - soundFirstOffset;
+    const delay = playTime - Date.now();
+
+    if (delay > 0) {
+      setTimeout(() => playSound(note), delay);
+    } else {
+      playSound(note);
+    }
+
+    scheduledNotesRef.current.push({ note, expectedTimestamp, hit: false, beat });
+  }, [soundFirstOffset]);
 
   // 옥타브 시프트 뷰포트 상태 (난이도에 따라 백건 개수 가변)
   const getViewportSize = () => {
@@ -641,12 +669,27 @@ export default function App() {
     setIsTraining(true);
     setScore(0);
     setFeedback('훈련 시작!');
+    setCurrentSong(null);
     playNextQuestion();
+  };
+
+  const startFallingNoteMode = () => {
+    setIsTraining(true);
+    setScore(0);
+    setFeedback('낙하노트 훈련 시작!');
+    setCurrentNote(null);
+    scheduledNotesRef.current = [];
+    setHitNoteIds([]);
+    // 3단계(중급) 이하면 5음(펜타토닉) 중 랜덤 1곡, 4단계(상급) 이상이면 8음(백건) 중 랜덤 1곡
+    const availableSongs = difficulty === '1단계' || difficulty === '2단계' || difficulty === '3단계' ? songs.filter(s => s.scale === 'penta5') : songs.filter(s => s.scale === 'white8');
+    const pickedSong = availableSongs[Math.floor(Math.random() * availableSongs.length)];
+    setCurrentSong(pickedSong);
   };
 
   const stopTraining = () => {
     setIsTraining(false);
     setCurrentNote(null);
+    setCurrentSong(null);
     setFeedback('');
   };
 
@@ -678,8 +721,34 @@ export default function App() {
     }
 
     // 3. 청능 훈련 채점 판단
-    if (isTraining && currentNote) {
-      if (note === currentNote) {
+    if (isTraining) {
+      if (currentSong) {
+        const now = Date.now();
+        const hitWindowMs = 300;
+        const targetIndex = scheduledNotesRef.current.findIndex(sn => 
+          !sn.hit && sn.note === note && Math.abs(sn.expectedTimestamp - now) <= hitWindowMs
+        );
+        
+        if (targetIndex !== -1) {
+          const hitNote = scheduledNotesRef.current[targetIndex];
+          scheduledNotesRef.current[targetIndex].hit = true;
+          setHitNoteIds(prev => [...prev, `${hitNote.note}-${hitNote.beat}`]);
+          
+          const newScore = score + 1;
+          setScore(newScore);
+          
+          const index = score % 15;
+          const skyWidth = width - 60;
+          const x = 30 + (skyWidth * (index / 14));
+          const y = 75 + Math.sin(index * 1.5) * 10;
+          visualizerRef.current?.addStar(x, y);
+          
+          setFeedback('Great!');
+        } else {
+          setFeedback('Miss');
+        }
+      } else if (currentNote) {
+        if (note === currentNote) {
         const newScore = score + 1;
         setScore(newScore);
 
@@ -732,7 +801,8 @@ export default function App() {
         visualizerRef.current?.onWrong(); // 오답 시 별자리 흩어짐(초기화)
       }
     }
-  }, [isTraining, currentNote, playNextQuestion, score, progress, difficulty, starContext, clearContext]);
+  }
+  }, [isTraining, currentNote, currentSong, playNextQuestion, score, progress, difficulty, starContext, clearContext]);
 
   const handleNotePressOut = useCallback((note: Note) => {
     setActiveNotes(prev => {
@@ -781,6 +851,19 @@ export default function App() {
           <View style={styles.midgroundLayer} pointerEvents="box-none">
             {/* 상단 피아노 건반 영역 */}
             <View style={styles.pianoArea} pointerEvents="box-none">
+              {currentSong && (
+                <View style={[StyleSheet.absoluteFill, { zIndex: 10 }]} pointerEvents="none">
+                  <FallingNoteTrack 
+                    song={currentSong}
+                    isPlaying={isTraining}
+                    onNoteSchedule={handleNoteSchedule}
+                    viewportStartIdx={currentStartIdx}
+                    dynamicWhiteKeyWidth={dynamicStyles.whiteKeyWidth}
+                    whiteIdxMap={whiteIdxMap}
+                    hitNoteIds={hitNoteIds}
+                  />
+                </View>
+              )}
               {!isFixedViewport && (
                 <View style={styles.octaveController}>
                   <Animated.View style={{
@@ -882,11 +965,19 @@ export default function App() {
 
               {/* 오른쪽 영역: 훈련 액션 */}
               <View style={styles.actionSection}>
+                {!isTraining && (
+                  <TouchableOpacity
+                    style={styles.trainingButton}
+                    onPress={startFallingNoteMode}
+                  >
+                    <Text style={styles.buttonText}>낙하노트</Text>
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity
                   style={[styles.trainingButton, isTraining && styles.trainingButtonActive]}
                   onPress={isTraining ? stopTraining : startTraining}
                 >
-                  <Text style={styles.buttonText}>{isTraining ? '훈련 종료' : '청능 훈련'}</Text>
+                  <Text style={styles.buttonText}>{isTraining ? '훈련 종료' : '무작위 훈련'}</Text>
                 </TouchableOpacity>
                 {isTraining && (
                   <TouchableOpacity style={styles.repeatButton} onPress={repeatSound}>
