@@ -41,6 +41,7 @@ interface MiniKeyboardMapProps {
   setViewportStartIdx: (idx: number) => void;
   currentNote: string | null;
   isTraining: boolean;
+  viewportSize?: number;
 }
 
 export const MiniKeyboardMap: React.FC<MiniKeyboardMapProps> = ({
@@ -48,13 +49,13 @@ export const MiniKeyboardMap: React.FC<MiniKeyboardMapProps> = ({
   setViewportStartIdx,
   currentNote,
   isTraining,
+  viewportSize = 16,
 }) => {
   // 미니맵 수치 정의
   const WHITE_KEY_WIDTH = 6;
   const WHITE_KEY_HEIGHT = 28;
   const BLACK_KEY_WIDTH = 3.6;
   const BLACK_KEY_HEIGHT = 18;
-  const VIEWPORT_KEYS = 14;
 
   const totalWidth = whiteNotes.length * WHITE_KEY_WIDTH; // 30 * 6 = 180px
 
@@ -63,21 +64,29 @@ export const MiniKeyboardMap: React.FC<MiniKeyboardMapProps> = ({
     const leftPosition = viewportStartIdx * WHITE_KEY_WIDTH;
     return {
       left: withTiming(leftPosition, { duration: 250 }),
-      width: VIEWPORT_KEYS * WHITE_KEY_WIDTH, // 14 * 6 = 84px
+      width: viewportSize * WHITE_KEY_WIDTH, // 동적 크기 반영
     };
   });
 
-  // 미니맵 터치 시 가장 가까운 3가지 고정 스냅(0, 14, 16) 지점 매핑
+  // 미니맵 터치 시 가장 가까운 고정 스냅 지점 매핑 (16건반 기준 0 또는 14로 토글)
   const handleMapPress = (event: any) => {
     const { locationX } = event.nativeEvent;
     const tappedWhiteIdx = Math.floor(locationX / WHITE_KEY_WIDTH);
 
-    if (tappedWhiteIdx < 7) {
-      setViewportStartIdx(0);
-    } else if (tappedWhiteIdx >= 7 && tappedWhiteIdx < 15) {
-      setViewportStartIdx(14);
+    if (viewportSize === 16) {
+      if (tappedWhiteIdx < 15) {
+        setViewportStartIdx(0);
+      } else {
+        setViewportStartIdx(14);
+      }
     } else {
-      setViewportStartIdx(16);
+      if (tappedWhiteIdx < 7) {
+        setViewportStartIdx(0);
+      } else if (tappedWhiteIdx >= 7 && tappedWhiteIdx < 15) {
+        setViewportStartIdx(14);
+      } else {
+        setViewportStartIdx(16);
+      }
     }
   };
 

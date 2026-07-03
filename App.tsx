@@ -398,12 +398,13 @@ export default function App() {
   const [feedback, setFeedback] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('3단계');
   const [progress, setProgress] = useState<MusicProgress>({});
+  const [showMissionSuccess, setShowMissionSuccess] = useState(false);
 
   // 옥타브 시프트 뷰포트 상태 (난이도에 따라 백건 개수 가변)
   const getViewportSize = () => {
     if (difficulty === '1단계') return 8;
     if (difficulty === '2단계') return 15;
-    return 14;
+    return 16; // 3단계(중급) 및 4단계(상급)에서 16건반 지원
   };
   const VIEWPORT_SIZE = getViewportSize();
 
@@ -682,10 +683,10 @@ export default function App() {
         const newScore = score + 1;
         setScore(newScore);
 
-        // 정답 시 콤보 별자리 생성: 왼쪽 240px 제어반을 피해 가로로 흐르는 사인파 은하수 파동선 빌드
+        // 정답 시 콤보 별자리 생성: 화면 가로 폭 전체를 활용하여 흐르는 사인파 은하수 파동선 빌드 (하단 제어반 배치 반영)
         const index = score % 15; // 최대 15개 콤보 순환
-        const skyWidth = width - 240 - 60; // 좌측 제어판(240px) 및 양쪽 마진 우회
-        const x = 240 + 30 + (skyWidth * (index / 14)); // X축 가로 등간격 전진
+        const skyWidth = width - 60; // 양쪽 마진 우회
+        const x = 30 + (skyWidth * (index / 14)); // X축 가로 등간격 전진
         const y = 75 + Math.sin(index * 1.5) * 10; // Y축 완만한 위아래 물결 파동 구현 (옥타브 컨트롤러와 건반 사이 안착)
         visualizerRef.current?.addStar(x, y);
 
@@ -708,11 +709,23 @@ export default function App() {
           clearContext?.markAsCleared(`music_${difficulty}`);
         }
 
-        setFeedback('정답!');
-        setTimeout(() => {
-          setFeedback('다음 문제');
-          playNextQuestion();
-        }, 1000);
+        if (newScore === 5) {
+          // 5점 최초 달성 시 성공 햅틱 및 화면 중앙 오버레이 피드백 제공
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          setShowMissionSuccess(true);
+          setFeedback('정답!');
+          setTimeout(() => {
+            setShowMissionSuccess(false);
+            setFeedback('다음 문제');
+            playNextQuestion();
+          }, 2500);
+        } else {
+          setFeedback('정답!');
+          setTimeout(() => {
+            setFeedback('다음 문제');
+            playNextQuestion();
+          }, 1000);
+        }
       } else {
         setScore(prev => (prev > 0 ? prev - 1 : 0));
         setFeedback('오답! 다시 들어보세요.');
@@ -730,36 +743,24 @@ export default function App() {
   }, []);
 
   const handleShiftLeft = () => {
-    setViewportStartIdx(prev => {
-      if (prev === 16) return 14;
-      return 0;
-    });
+    setViewportStartIdx(0);
   };
 
   const handleShiftRight = () => {
-    setViewportStartIdx(prev => {
-      if (prev === 0) return 14;
-      return 16;
-    });
+    setViewportStartIdx(14);
   };
 
-  const getViewportRangeLabel = () => {
-    const whiteKeys = allNotes.filter(note => !isBlackKeyMap[note]);
-    const startNote = whiteKeys[viewportStartIdx];
-    const endNote = whiteKeys[viewportStartIdx + VIEWPORT_SIZE - 1];
-    return `${startNote} ~ ${endNote}`;
-  };
 
-  const CONTROL_PANEL_WIDTH = 240;
+  const BOTTOM_PANEL_HEIGHT = 115;
   const PIANO_AREA_PADDING = 20;
-  const pianoAreaWidth = width - CONTROL_PANEL_WIDTH - PIANO_AREA_PADDING;
+  const pianoAreaWidth = width - PIANO_AREA_PADDING;
 
   const dynamicWhiteKeyWidth = pianoAreaWidth / VIEWPORT_SIZE;
   const dynamicStyles = {
     whiteKeyWidth: dynamicWhiteKeyWidth,
     blackKeyWidth: dynamicWhiteKeyWidth * 0.6,
-    whiteKeyHeight: height - 180, // 기존보다 약 80px 하향 조정하여 실제 피아노 1:5 비율과 대칭
-    blackKeyHeight: (height - 180) * 0.65,
+    whiteKeyHeight: height - BOTTOM_PANEL_HEIGHT - 90, // 하단 제어반 높이를 고려하여 산정
+    blackKeyHeight: (height - BOTTOM_PANEL_HEIGHT - 90) * 0.65,
   };
 
   const handlers = { handleNotePressIn, handleNotePressOut };
@@ -778,48 +779,7 @@ export default function App() {
         <SafeAreaView style={styles.fullScreen}>
           {/* 2. Midground Layer (Piano & 훈련 인터페이스) */}
           <View style={styles.midgroundLayer} pointerEvents="box-none">
-            {/* 좌측 미션 제어반 */}
-            <View style={styles.trainingContainer}>
-              <View style={{ position: 'absolute', top: -20, left: 100, zIndex: 100 }}>
-                <MissionProgressIcon currentStep={score} totalSteps={5} />
-              </View>
-              <Text style={styles.scoreText}>점수: {score}</Text>
-              <View style={styles.buttonContainer}>
-                <TouchableOpacity
-                  style={styles.trainingButton}
-                  onPress={isTraining ? stopTraining : startTraining}
-                >
-                  <Text style={styles.buttonText}>{isTraining ? '훈련 종료' : '청능 훈련'}</Text>
-                </TouchableOpacity>
-                {isTraining && (
-                  <TouchableOpacity style={styles.trainingButton} onPress={repeatSound}>
-                    <Text style={styles.buttonText}>다시 듣기</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              {SHOW_ANSWER_HINT && isTraining && currentNote && (
-                <Text style={{ color: '#FF453A', fontSize: 18, fontWeight: 'bold', marginVertical: 6, textAlign: 'center' }}>
-                  ★ 정답: {currentNote}
-                </Text>
-              )}
-              <Text style={styles.feedbackText}>{feedback}</Text>
-              <View style={styles.difficultyContainerWrapper}>
-                <View style={styles.difficultyContainer}>
-                  {difficultyLevels.map(({ name, label }) => (
-                    <TouchableOpacity
-                      key={name}
-                      style={[styles.difficultyButton, difficulty === name && styles.difficultyButtonActive]}
-                      onPress={() => !isTraining && setDifficulty(name)}
-                      disabled={isTraining}
-                    >
-                      <Text style={styles.difficultyButtonText}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-
-            {/* 우측 피아노 건반 영역 */}
+            {/* 상단 피아노 건반 영역 */}
             <View style={styles.pianoArea} pointerEvents="box-none">
               {!isFixedViewport && (
                 <View style={styles.octaveController}>
@@ -848,6 +808,7 @@ export default function App() {
                       setViewportStartIdx={setViewportStartIdx}
                       currentNote={currentNote}
                       isTraining={isTraining}
+                      viewportSize={VIEWPORT_SIZE}
                     />
                   </View>
 
@@ -858,11 +819,11 @@ export default function App() {
                     <TouchableOpacity
                       style={[
                         styles.octaveBtn,
-                        viewportStartIdx === 16 && styles.octaveBtnDisabled,
+                        viewportStartIdx === 14 && styles.octaveBtnDisabled,
                         (isTraining && currentNote && (whiteIdxRefById.get(currentNote) ?? 0) >= viewportStartIdx + VIEWPORT_SIZE && difficulty === '4단계') && styles.octaveBtnHighlight
                       ]}
                       onPress={handleShiftRight}
-                      disabled={viewportStartIdx === 16}
+                      disabled={viewportStartIdx === 14}
                     >
                       <Text style={styles.octaveBtnText}>옥타브 높임</Text>
                       <Ionicons name="chevron-forward" size={24} color="#fff" />
@@ -886,7 +847,65 @@ export default function App() {
                 </View>
               </View>
             </View>
+
+            {/* 하단 미션 제어반 */}
+            <View style={styles.trainingContainer}>
+              {/* 왼쪽 영역: 점수 및 피드백 */}
+              <View style={styles.infoSection}>
+                <View style={styles.scoreRow}>
+                  <Text style={styles.scoreText}>점수: {score}</Text>
+                  <View style={{ marginLeft: 8 }}>
+                    <MissionProgressIcon currentStep={Math.min(score, 5)} totalSteps={5} />
+                  </View>
+                </View>
+                <Text style={styles.feedbackText}>{feedback}</Text>
+                {SHOW_ANSWER_HINT && isTraining && currentNote && (
+                  <Text style={styles.hintText}>★ 정답: {currentNote}</Text>
+                )}
+              </View>
+
+              {/* 중앙 영역: 난이도 선택 */}
+              <View style={styles.difficultySection}>
+                <View style={styles.difficultyContainer}>
+                  {difficultyLevels.map(({ name, label }) => (
+                    <TouchableOpacity
+                      key={name}
+                      style={[styles.difficultyButton, difficulty === name && styles.difficultyButtonActive]}
+                      onPress={() => !isTraining && setDifficulty(name)}
+                      disabled={isTraining}
+                    >
+                      <Text style={styles.difficultyButtonText}>{label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              {/* 오른쪽 영역: 훈련 액션 */}
+              <View style={styles.actionSection}>
+                <TouchableOpacity
+                  style={[styles.trainingButton, isTraining && styles.trainingButtonActive]}
+                  onPress={isTraining ? stopTraining : startTraining}
+                >
+                  <Text style={styles.buttonText}>{isTraining ? '훈련 종료' : '청능 훈련'}</Text>
+                </TouchableOpacity>
+                {isTraining && (
+                  <TouchableOpacity style={styles.repeatButton} onPress={repeatSound}>
+                    <Text style={styles.buttonText}>다시 듣기</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
           </View>
+
+          {/* 미션 성공 오버레이 (터치 차단 포함) */}
+          {showMissionSuccess && (
+            <View style={styles.missionOverlay}>
+              <View style={styles.missionOverlayBox}>
+                <Text style={styles.missionOverlayText}>★ 미션 성공! ★</Text>
+                <Text style={styles.missionOverlaySubText}>자유롭게 계속 도전해보세요!</Text>
+              </View>
+            </View>
+          )}
 
           {/* 3. Ripple Effect Layer / Particle Visualizer (가장 상위 레이어 zIndex: 99 강제 배치) */}
           <View style={styles.rippleContainer} pointerEvents="none">
@@ -906,7 +925,7 @@ const styles = StyleSheet.create({
   fullScreen: {
     flex: 1,
     backgroundColor: '#000',
-    flexDirection: 'row',
+    flexDirection: 'column',
   },
   backgroundLayer: {
     position: 'absolute',
@@ -922,19 +941,56 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    flexDirection: 'row',
+    flexDirection: 'column',
     zIndex: 2,
   },
   trainingContainer: {
-    width: 240,
-    height: '100%',
-    paddingVertical: 20,
-    paddingHorizontal: 10,
-    backgroundColor: 'rgba(34, 34, 34, 0.75)', // 우주 배경이 슬쩍 비치도록 반투명하게 변경 (Glassmorphism 연출)
+    width: '100%',
+    height: 115,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(34, 34, 34, 0.85)',
     alignItems: 'center',
-    justifyContent: 'space-around',
-    borderRightWidth: 2,
-    borderRightColor: 'rgba(255, 255, 255, 0.1)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 2,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  infoSection: {
+    flex: 1.2,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  hintText: {
+    color: '#FF453A',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginTop: 2,
+  },
+  difficultySection: {
+    flex: 1.8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionSection: {
+    flex: 1.2,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  repeatButton: {
+    backgroundColor: '#34C759',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pianoArea: {
     flex: 1,
@@ -993,7 +1049,6 @@ const styles = StyleSheet.create({
   },
   difficultyContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     justifyContent: 'center',
   },
   buttonContainer: {
@@ -1024,12 +1079,14 @@ const styles = StyleSheet.create({
   },
   trainingButton: {
     backgroundColor: '#007BFF',
-    paddingVertical: 12,
-    paddingHorizontal: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    marginVertical: 6,
-    width: 200,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trainingButtonActive: {
+    backgroundColor: '#FF3B30',
   },
   difficultyButtonText: {
     color: 'white',
@@ -1037,17 +1094,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   scoreText: {
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: 'bold',
     color: 'white',
-    textAlign: 'center',
   },
   feedbackText: {
-    fontSize: 18,
+    fontSize: 15,
     color: '#4CAF50',
     fontWeight: 'bold',
-    minHeight: 50,
-    textAlign: 'center',
+    marginTop: 2,
   },
   buttonText: {
     color: 'white',
@@ -1134,5 +1189,43 @@ const styles = StyleSheet.create({
     bottom: 0,
     zIndex: 99,
     elevation: 99,
+  },
+  missionOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 115, // 하단 제어반(115px)을 제외한 피아노 영역 전체를 커버하여 터치 차단
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 90,
+  },
+  missionOverlayBox: {
+    backgroundColor: 'rgba(20, 20, 20, 0.95)',
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: '#00e5ff',
+    alignItems: 'center',
+    shadowColor: '#00e5ff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  missionOverlayText: {
+    color: '#00e5ff',
+    fontSize: 26,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  missionOverlaySubText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginTop: 6,
+    textAlign: 'center',
   },
 });
