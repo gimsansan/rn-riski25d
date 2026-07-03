@@ -33,6 +33,7 @@ import { StarContext } from './context/StarContext';
 import { RippleLayer } from './components/RippleLayer';
 import { ParticleVisualizer, ParticleVisualizerRef } from './components/ParticleVisualizer';
 import { randomSkyPoint } from './components/SoundConstellation';
+import { MiniKeyboardMap } from './components/MiniKeyboardMap';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -101,13 +102,10 @@ allNotes.forEach(note => {
 });
 
 const computeFocusStart = (noteWhiteIdx: number, currentStart: number, viewportSize: number, totalWhite: number) => {
-  const end = currentStart + viewportSize - 1;
-  if (noteWhiteIdx >= currentStart && noteWhiteIdx <= end) {
-    return currentStart;
-  }
-  const maxStart = Math.max(0, totalWhite - viewportSize);
-  const centered = noteWhiteIdx - Math.floor(viewportSize / 2);
-  return Math.max(0, Math.min(centered, maxStart));
+  // 14건반 페이지 스냅에 맞춘 포커싱 처리
+  if (noteWhiteIdx <= 13) return 0;
+  if (noteWhiteIdx <= 27) return 14;
+  return 16;
 };
 
 const useAutoFocusViewport = ({
@@ -401,9 +399,88 @@ export default function App() {
   const [difficulty, setDifficulty] = useState<Difficulty>('3단계');
   const [progress, setProgress] = useState<MusicProgress>({});
 
-  // 옥타브 시프트 뷰포트 상태
-  const VIEWPORT_SIZE = 14;
+  // 옥타브 시프트 뷰포트 상태 (난이도에 따라 백건 개수 가변)
+  const getViewportSize = () => {
+    if (difficulty === '1단계') return 8;
+    if (difficulty === '2단계') return 15;
+    return 14;
+  };
+  const VIEWPORT_SIZE = getViewportSize();
+
   const [viewportStartIdx, setViewportStartIdx] = useState(14);
+
+  // 1, 2, 3단계에서는 시작 옥타브 인덱스를 C3(14)로 강제 고정
+  const isFixedViewport = difficulty === '1단계' || difficulty === '2단계' || difficulty === '3단계';
+  const currentStartIdx = isFixedViewport ? 14 : viewportStartIdx;
+
+  // 옥타브 버튼 애니메이션용 Shared Values
+  const leftArrowOpacity = useSharedValue(1);
+  const leftArrowTranslateX = useSharedValue(0);
+  const rightArrowOpacity = useSharedValue(1);
+  const rightArrowTranslateX = useSharedValue(0);
+
+  // 옥타브 가이드 애니메이션 제어
+  useEffect(() => {
+    if (!isTraining || !currentNote) {
+      leftArrowOpacity.value = withTiming(1, { duration: 200 });
+      leftArrowTranslateX.value = withTiming(0, { duration: 200 });
+      rightArrowOpacity.value = withTiming(1, { duration: 200 });
+      rightArrowTranslateX.value = withTiming(0, { duration: 200 });
+      return;
+    }
+
+    const noteWhiteIdx = whiteIdxRefById.get(currentNote);
+    if (noteWhiteIdx == null) return;
+
+    // 오직 4단계(상급) 모드에서만 화면 밖에 음이 있을 때 화살표 힌트 가이드 애니메이션 기동
+    const isGuideActive = difficulty === '4단계';
+    const showLeftGuide = isGuideActive && noteWhiteIdx < currentStartIdx;
+    const showRightGuide = isGuideActive && noteWhiteIdx >= currentStartIdx + VIEWPORT_SIZE;
+
+    if (showLeftGuide) {
+      leftArrowOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 500, easing: Easing.ease }),
+          withTiming(1, { duration: 500, easing: Easing.ease })
+        ),
+        -1,
+        true
+      );
+      leftArrowTranslateX.value = withRepeat(
+        withSequence(
+          withTiming(-6, { duration: 400, easing: Easing.ease }),
+          withTiming(0, { duration: 400, easing: Easing.ease })
+        ),
+        -1,
+        true
+      );
+    } else {
+      leftArrowOpacity.value = withTiming(1, { duration: 200 });
+      leftArrowTranslateX.value = withTiming(0, { duration: 200 });
+    }
+
+    if (showRightGuide) {
+      rightArrowOpacity.value = withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 500, easing: Easing.ease }),
+          withTiming(1, { duration: 500, easing: Easing.ease })
+        ),
+        -1,
+        true
+      );
+      rightArrowTranslateX.value = withRepeat(
+        withSequence(
+          withTiming(6, { duration: 400, easing: Easing.ease }),
+          withTiming(0, { duration: 400, easing: Easing.ease })
+        ),
+        -1,
+        true
+      );
+    } else {
+      rightArrowOpacity.value = withTiming(1, { duration: 200 });
+      rightArrowTranslateX.value = withTiming(0, { duration: 200 });
+    }
+  }, [isTraining, currentNote, currentStartIdx, difficulty, VIEWPORT_SIZE]);
 
   // 터치 물결 효과용 Shared Values
   const touchX = useSharedValue(0);
@@ -421,9 +498,9 @@ export default function App() {
 
   const { height, width } = useWindowDimensions();
 
-  // 자동 옥타브 포커싱 훅 결합
+  // 자동 옥타브 포커싱 훅 결합 (기존 포커싱 기능은 완전히 비활성화하여 수동 이동 유도)
   useAutoFocusViewport({
-    currentNote,
+    currentNote: null,
     viewportStartIdx,
     setViewportStartIdx,
     totalWhite: allNotes.filter(n => !isBlackKeyMap[n]).length,
@@ -653,11 +730,17 @@ export default function App() {
   }, []);
 
   const handleShiftLeft = () => {
-    setViewportStartIdx(prev => Math.max(0, prev - 7));
+    setViewportStartIdx(prev => {
+      if (prev === 16) return 14;
+      return 0;
+    });
   };
 
   const handleShiftRight = () => {
-    setViewportStartIdx(prev => Math.min(16, prev + 7));
+    setViewportStartIdx(prev => {
+      if (prev === 0) return 14;
+      return 16;
+    });
   };
 
   const getViewportRangeLabel = () => {
@@ -738,27 +821,55 @@ export default function App() {
 
             {/* 우측 피아노 건반 영역 */}
             <View style={styles.pianoArea} pointerEvents="box-none">
-              <View style={styles.octaveController}>
-                <TouchableOpacity
-                  style={[styles.octaveBtn, viewportStartIdx === 0 && styles.octaveBtnDisabled]}
-                  onPress={handleShiftLeft}
-                  disabled={viewportStartIdx === 0}
-                >
-                  <Ionicons name="chevron-back" size={24} color="#fff" />
-                  <Text style={styles.octaveBtnText}>옥타브 낮춤</Text>
-                </TouchableOpacity>
-                <View style={styles.octaveIndicator}>
-                  <Text style={styles.octaveIndicatorText}>현재 범위: {getViewportRangeLabel()}</Text>
+              {!isFixedViewport && (
+                <View style={styles.octaveController}>
+                  <Animated.View style={{
+                    opacity: leftArrowOpacity,
+                    transform: [{ translateX: leftArrowTranslateX }]
+                  }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.octaveBtn,
+                        viewportStartIdx === 0 && styles.octaveBtnDisabled,
+                        (isTraining && currentNote && (whiteIdxRefById.get(currentNote) ?? 0) < viewportStartIdx && difficulty === '4단계') && styles.octaveBtnHighlight
+                      ]}
+                      onPress={handleShiftLeft}
+                      disabled={viewportStartIdx === 0}
+                    >
+                      <Ionicons name="chevron-back" size={24} color="#fff" />
+                      <Text style={styles.octaveBtnText}>옥타브 낮춤</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
+
+                  {/* 중앙 미니 피아노 맵 배치 */}
+                  <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                    <MiniKeyboardMap
+                      viewportStartIdx={currentStartIdx}
+                      setViewportStartIdx={setViewportStartIdx}
+                      currentNote={currentNote}
+                      isTraining={isTraining}
+                    />
+                  </View>
+
+                  <Animated.View style={{
+                    opacity: rightArrowOpacity,
+                    transform: [{ translateX: rightArrowTranslateX }]
+                  }}>
+                    <TouchableOpacity
+                      style={[
+                        styles.octaveBtn,
+                        viewportStartIdx === 16 && styles.octaveBtnDisabled,
+                        (isTraining && currentNote && (whiteIdxRefById.get(currentNote) ?? 0) >= viewportStartIdx + VIEWPORT_SIZE && difficulty === '4단계') && styles.octaveBtnHighlight
+                      ]}
+                      onPress={handleShiftRight}
+                      disabled={viewportStartIdx === 16}
+                    >
+                      <Text style={styles.octaveBtnText}>옥타브 높임</Text>
+                      <Ionicons name="chevron-forward" size={24} color="#fff" />
+                    </TouchableOpacity>
+                  </Animated.View>
                 </View>
-                <TouchableOpacity
-                  style={[styles.octaveBtn, viewportStartIdx === 16 && styles.octaveBtnDisabled]}
-                  onPress={handleShiftRight}
-                  disabled={viewportStartIdx === 16}
-                >
-                  <Text style={styles.octaveBtnText}>옥타브 높임</Text>
-                  <Ionicons name="chevron-forward" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
+              )}
 
               <View style={styles.pianoContainer} pointerEvents="box-none">
                 <View style={styles.pianoWrapper} pointerEvents="box-none">
@@ -769,7 +880,7 @@ export default function App() {
                     handlers,
                     dynamicStyles,
                     KEYBOARD_ENABLED,
-                    viewportStartIdx,
+                    currentStartIdx,
                     VIEWPORT_SIZE
                   )}
                 </View>
@@ -849,6 +960,14 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 6,
+  },
+  octaveBtnHighlight: {
+    backgroundColor: '#00e5ff',
+    shadowColor: '#00e5ff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 10,
   },
   octaveBtnDisabled: {
     backgroundColor: '#555',
@@ -997,14 +1116,15 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   whiteKeyDisabled: {
-    backgroundColor: '#c4c4c4',
-    borderColor: '#888',
+    backgroundColor: '#666',
+    borderColor: '#444',
+    opacity: 0.25,
   },
   keyDisabled: {
-    opacity: 0.4,
+    opacity: 0.25,
   },
   keyLabelDisabled: {
-    color: '#777',
+    color: '#555',
   },
   rippleContainer: {
     position: 'absolute',
