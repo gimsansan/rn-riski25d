@@ -263,3 +263,52 @@
 #### [MODIFY] [components/FallingNoteTrack.tsx](file:///d:/Projects/rn-riski25d/components/FallingNoteTrack.tsx)
 - Props로 받은 좌표계를 사용해 건반과 동일한 위치에 노트가 떨어지도록 `getLaneX` 등 수정.
 - Hit된 노트를 화면에서 감추거나 파괴되는 애니메이션을 추가하기 위한 상태 연동.
+
+## 🔧 Phase 13: 낙하노트 품질 개선 — 레인 정렬·귀 먼저 토글·곡 종료 처리 (완료)
+
+Phase 12 통합 검증에서 확인된 3가지 실무 이슈를 해결합니다.
+
+### 1. 주요 구현 사양
+
+#### 1-1. 레인 구분선 좌표 정렬 (Bug Fix)
+- **문제**: 통합 모드(`isIntegrated = true`)에서 `getLaneX`는 `relativeIdx * laneWidth` 공식으로 노트 X좌표를 계산하지만, 레인 구분선은 독립 모드용 `LANE_MARGIN + i * laneWidth` 공식을 그대로 사용 중.
+  → 결과적으로 **노트는 건반에 맞춰 떨어지는데 구분선만 왼쪽에 어긋남**.
+- **수정**: `isIntegrated` 분기를 레인 구분선·판정선 렌더링에도 동일하게 적용.
+  - 통합 모드: `palette` 각 음의 `getLaneX(note)`를 기준으로 구분선 X 좌표 산출.
+  - 판정선도 레인 영역 범위(`getLaneX(palette[0])` ~ `getLaneX(palette[last]) + laneWidth`)로 클리핑.
+
+#### 1-2. '귀 먼저(Sound First)' UI 토글
+- **현재**: `soundFirstOffset` 상태(기본 0)는 존재하나 사용자가 변경할 UI 없음.
+- **인계문 §4 기준**: "기본 OFF, 원하는 사람만 ON" 토글.
+- **수정**: 낙하노트 모드 진행 중일 때, 하단 제어반 actionSection에 **'👂 귀 먼저'** 토글 버튼 1개 추가.
+  - OFF (기본): `soundFirstOffset = 0` → 판정선 도달과 동시에 소리.
+  - ON: `soundFirstOffset = 500` → 소리가 500ms 먼저 남 (시각은 확인용).
+  - 훈련 중 언제든 토글 가능. 시각적으로 활성 상태 구분(네온 테두리).
+
+#### 1-3. 곡 종료 자동 처리
+- **문제**: 마지막 노트가 판정선을 지나도 아무 일도 안 일어남. `useFrameCallback`이 계속 돌며 빈 화면 유지.
+- **수정**:
+  - `FallingNoteTrack`에 `onSongEnd` 콜백 Props 추가.
+  - `useDerivedValue`로 현재 beat가 마지막 노트 beat + 여유 2박을 초과했는지 감시.
+  - 초과 시 `runOnJS`로 `onSongEnd` 콜백 1회 호출.
+  - `App.tsx`에서 `onSongEnd` 수신 시:
+    - 결과 피드백 표시 (예: "곡 종료! {hitCount}/{totalNotes} 히트").
+    - 성공 햅틱 → 2.5초 후 자동으로 훈련 종료 (`stopTraining()`).
+
+### Proposed Changes
+
+#### [MODIFY] [components/FallingNoteTrack.tsx](file:///d:/Projects/rn-riski25d/components/FallingNoteTrack.tsx)
+- `onSongEnd?: () => void` Props 추가.
+- 레인 구분선 렌더링을 `isIntegrated` 분기에 맞춰 `getLaneX` 기반으로 수정.
+- 판정선 범위도 통합 모드에서 레인 영역에 맞게 클리핑.
+- 마지막 노트 beat + 2박 초과 시 `onSongEnd` 1회 방출하는 `useDerivedValue` 추가.
+
+#### [MODIFY] [App.tsx](file:///d:/Projects/rn-riski25d/App.tsx)
+- `soundFirstOffset` 토글 UI 버튼 추가 (낙하노트 모드 중에만 표시).
+- `handleSongEnd` 콜백 정의: 결과 피드백 + 성공 햅틱 + 2.5초 후 `stopTraining()`.
+- `FallingNoteTrack`에 `onSongEnd={handleSongEnd}` Props 전달.
+
+### Verification Plan
+- 낙하노트 모드 시작 후 **구분선과 노트 블록이 건반 위에 정확히 겹치는지** 시각 확인.
+- '귀 먼저' 토글 ON 시 **노트 도달 약 0.5초 전에 소리가 먼저 나는지** 확인.
+- 마지막 노트 통과 후 **2~3초 내에 결과 텍스트가 표시되고 자동 종료**되는지 확인.

@@ -693,6 +693,16 @@ export default function App() {
     setFeedback('');
   };
 
+  const handleSongEnd = useCallback(() => {
+    const totalNotes = currentSong?.notes.length ?? 0;
+    const hitCount = hitNoteIds.length;
+    setFeedback(`곡 종료! ${hitCount}/${totalNotes} 히트`);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    setTimeout(() => {
+      stopTraining();
+    }, 2500);
+  }, [currentSong, hitNoteIds]);
+
   const repeatSound = () => {
     if (currentNote) {
       playSound(currentNote);
@@ -857,6 +867,7 @@ export default function App() {
                     song={currentSong}
                     isPlaying={isTraining}
                     onNoteSchedule={handleNoteSchedule}
+                    onSongEnd={handleSongEnd}
                     viewportStartIdx={currentStartIdx}
                     dynamicWhiteKeyWidth={dynamicStyles.whiteKeyWidth}
                     whiteIdxMap={whiteIdxMap}
@@ -984,6 +995,14 @@ export default function App() {
                     <Text style={styles.buttonText}>다시 듣기</Text>
                   </TouchableOpacity>
                 )}
+                {isTraining && currentSong && (
+                  <TouchableOpacity
+                    style={[styles.soundFirstToggle, soundFirstOffset > 0 && styles.soundFirstToggleActive]}
+                    onPress={() => setSoundFirstOffset(prev => prev > 0 ? 0 : 500)}
+                  >
+                    <Text style={styles.buttonText}>👂 귀 먼저</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             </View>
           </View>
@@ -1082,6 +1101,21 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  soundFirstToggle: {
+    backgroundColor: '#555',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#555',
+  },
+  soundFirstToggleActive: {
+    backgroundColor: '#1a1a2e',
+    borderColor: '#00ffcc',
+    borderWidth: 2,
   },
   pianoArea: {
     flex: 1,

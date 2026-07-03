@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { View, StyleSheet, useWindowDimensions, TouchableOpacity, Text } from 'react-native';
 import { Canvas, RoundedRect, Line, vec, Paint, Text as SkiaText, useFont } from '@shopify/react-native-skia';
 import { useFrameCallback, useSharedValue, runOnJS, useDerivedValue } from 'react-native-reanimated';
@@ -8,6 +8,7 @@ interface FallingNoteTrackProps {
   song: Song | null;
   isPlaying: boolean;
   onNoteSchedule?: (note: Note, expectedTimestamp: number, beat: number) => void;
+  onSongEnd?: () => void;
   viewportStartIdx?: number;
   dynamicWhiteKeyWidth?: number;
   whiteIdxMap?: Record<string, number>;
@@ -21,6 +22,7 @@ export const FallingNoteTrack: React.FC<FallingNoteTrackProps> = ({
   song,
   isPlaying,
   onNoteSchedule,
+  onSongEnd,
   viewportStartIdx,
   dynamicWhiteKeyWidth,
   whiteIdxMap,
@@ -38,6 +40,14 @@ export const FallingNoteTrack: React.FC<FallingNoteTrackProps> = ({
   // 어차피 "예정 시각"을 알려주는 것이 목표이므로, 재생 시작(t=0) 시점에 모든 노트의 예상 타임스탬프를 계산해서 던져줘도 됩니다!
   
   const [baseTimestamp, setBaseTimestamp] = useState<number | null>(null);
+  const songEndFired = useRef(false);
+
+  // isPlaying이 바뀔 때 songEndFired 리셋
+  useEffect(() => {
+    if (!isPlaying) {
+      songEndFired.current = false;
+    }
+  }, [isPlaying]);
 
   useFrameCallback((frame) => {
     if (!isPlaying) {
@@ -52,6 +62,16 @@ export const FallingNoteTrack: React.FC<FallingNoteTrackProps> = ({
     }
 
     currentTime.value = frame.timestamp - startTimestamp.value;
+
+    // 곡 종료 감지: 마지막 노트 beat + 여유 2박 경과 시 1회 콜백
+    if (song && onSongEnd && !songEndFired.current) {
+      const lastBeat = song.notes[song.notes.length - 1]?.beat ?? 0;
+      const currentBeat = (currentTime.value / 1000 / 60) * song.bpm;
+      if (currentBeat > lastBeat + 2) {
+        songEndFired.current = true;
+        runOnJS(onSongEnd)();
+      }
+    }
   }, true);
 
   // 재생이 시작되어 baseTimestamp가 세팅되면, 모든 노트의 스케줄을 부모에게 전달합니다.
@@ -86,30 +106,35 @@ export const FallingNoteTrack: React.FC<FallingNoteTrackProps> = ({
     return LANE_MARGIN + idx * laneWidth;
   };
 
+  // 레인 구분선 X 좌표 계산 (통합 모드에서도 건반에 맞춤)
+  const laneLineXs = palette.map((note) => getLaneX(note));
+  const firstLaneX = laneLineXs.length > 0 ? laneLineXs[0] : 0;
+  const lastLaneX = laneLineXs.length > 0 ? laneLineXs[laneLineXs.length - 1] + laneWidth : width;
+
   return (
     <View style={styles.container}>
       <Canvas style={{ flex: 1 }}>
-        {/* 레인 구분선 */}
-        {palette.map((_, i) => (
+        {/* 레인 구분선 (통합 모드: 건반 좌표 기반) */}
+        {laneLineXs.map((x, i) => (
           <Line
             key={`lane-${i}`}
-            p1={vec(LANE_MARGIN + i * laneWidth, 0)}
-            p2={vec(LANE_MARGIN + i * laneWidth, height)}
+            p1={vec(x, 0)}
+            p2={vec(x, height)}
             color="rgba(255, 255, 255, 0.1)"
             strokeWidth={1}
           />
         ))}
         <Line
-          p1={vec(LANE_MARGIN + palette.length * laneWidth, 0)}
-          p2={vec(LANE_MARGIN + palette.length * laneWidth, height)}
+          p1={vec(lastLaneX, 0)}
+          p2={vec(lastLaneX, height)}
           color="rgba(255, 255, 255, 0.1)"
           strokeWidth={1}
         />
 
-        {/* 판정선 */}
+        {/* 판정선 (레인 영역에 클리핑) */}
         <Line
-          p1={vec(LANE_MARGIN, JUDGMENT_LINE_Y)}
-          p2={vec(width - LANE_MARGIN, JUDGMENT_LINE_Y)}
+          p1={vec(firstLaneX, JUDGMENT_LINE_Y)}
+          p2={vec(lastLaneX, JUDGMENT_LINE_Y)}
           color="#00ffcc"
           strokeWidth={3}
         />

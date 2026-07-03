@@ -153,3 +153,24 @@
   - 사용자가 피아노 건반을 터치하면 오차 범위(`±300ms`) 내에 동일 음계의 낙하 노트가 있는지 대조하여 Hit를 판정합니다.
   - 타격감이 떨어지지 않게 정답 터치 시 기존 피아노 앱의 물리 진동 및 2.5D 건반 모션, 타격 음원 다중 재생(Polyphony) 로직이 그대로 발동하며 추가로 점수 콤보에 따른 소리 별자리 이펙트가 그려집니다.
   - Hit 판정을 받은 개별 노트는 즉시 투명도(`opacity: 0`) 처리되어 파괴(소멸)되는 시각적 피드백을 완성했습니다.
+
+## 🔧 Phase 13: 낙하노트 품질 개선 — 레인 정렬·귀 먼저 토글·곡 종료 처리 완료
+
+Phase 12 통합 검증에서 발견된 3가지 실무 이슈를 수정했습니다.
+
+### 주요 구현 내용
+* **레인 구분선 좌표 정렬 (Bug Fix):**
+  - 통합 모드(`isIntegrated = true`)에서 노트는 `getLaneX` 기반으로 건반에 맞춰 정확히 떨어지는 반면, 레인 구분선은 독립 모드 공식(`LANE_MARGIN + i * laneWidth`)을 그대로 사용해 시각적 어긋남이 발생하던 문제를 수정했습니다.
+  - 레인 구분선과 판정선 모두 `getLaneX(palette[i])` 기반 좌표를 공유하도록 통일하여, 건반·노트·구분선이 한 치 오차 없이 정렬됩니다.
+* **'귀 먼저(Sound First)' UI 토글 추가:**
+  - 인계문 §4에 명시된 **"기본 OFF, 원하는 사람만 ON"** 토글을 하단 제어반의 액션 영역에 배치했습니다.
+  - OFF(기본): `soundFirstOffset = 0` → 판정선 도달과 동시에 소리 재생.
+  - ON: `soundFirstOffset = 500ms` → 노트가 판정선에 닿기 0.5초 전에 소리가 먼저 남 (시각은 확인용).
+  - 활성 시 네온 민트색(`#00ffcc`) 테두리로 시각적 상태 구분.
+* **곡 종료 자동 처리:**
+  - `FallingNoteTrack`에 `onSongEnd` 콜백 Props를 추가하고, `useFrameCallback` 내부에서 현재 beat가 마지막 노트 beat + 여유 2박을 초과하면 `runOnJS`로 1회 콜백을 방출합니다.
+  - `App.tsx`에서 수신 시 `"곡 종료! {hitCount}/{totalNotes} 히트"` 피드백 + 성공 햅틱 진동을 표시하고, 2.5초 후 자동으로 훈련을 종료합니다.
+
+### 변경 파일
+- [FallingNoteTrack.tsx](file:///d:/Projects/rn-riski25d/components/FallingNoteTrack.tsx) — 레인 구분선 좌표 정렬 + `onSongEnd` 콜백
+- [App.tsx](file:///d:/Projects/rn-riski25d/App.tsx) — `handleSongEnd` 콜백 + '귀 먼저' 토글 UI + 스타일
